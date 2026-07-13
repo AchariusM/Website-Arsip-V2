@@ -1,0 +1,410 @@
+// ==================== KONFIGURASI ====================
+const API_BASE = '/api'; // otomatis mengarah ke folder /api di domain Vercel yang sama
+
+let currentUser = null;
+let deleteCallback = null;
+let selectedFile = null;
+let documents = [];
+let users = [];
+let docPage = 1;
+const docPerPage = 8;
+let globalSearchQuery = '';
+
+// ==================== HELPER FETCH ====================
+async function apiGet(path) {
+    const r = await fetch(API_BASE + path);
+    if (!r.ok) throw new Error((await r.json()).error || 'Gagal mengambil data');
+    return r.json();
+}
+async function apiSend(path, method, body) {
+    const r = await fetch(API_BASE + path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Terjadi kesalahan');
+    return data;
+}
+
+// ==================== UTILITAS ====================
+function formatDate(s) {
+    if (!s) return '-';
+    const b = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    const d = new Date(s);
+    return isNaN(d) ? s : d.getDate() + ' ' + b[d.getMonth()] + ' ' + d.getFullYear();
+}
+function formatFileSize(bytes) {
+    if (!bytes) return '-';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+function getFileIcon(t) {
+    if (!t) return '<i class="fas fa-file" style="color:#9CA3AF;"></i>';
+    if (t.includes('pdf')) return '<i class="fas fa-file-pdf" style="color:#DC2626;"></i>';
+    if (t.includes('word') || t.includes('doc')) return '<i class="fas fa-file-word" style="color:#2563EB;"></i>';
+    if (t.includes('sheet') || t.includes('xls')) return '<i class="fas fa-file-excel" style="color:#059669;"></i>';
+    if (t.includes('presentation') || t.includes('ppt')) return '<i class="fas fa-file-powerpoint" style="color:#D97706;"></i>';
+    if (t.includes('image') || t.includes('jpg') || t.includes('png')) return '<i class="fas fa-file-image" style="color:#7C3AED;"></i>';
+    return '<i class="fas fa-file" style="color:#9CA3AF;"></i>';
+}
+function getInitials(n) { if (!n) return '??'; const p = n.trim().split(/\s+/); return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : p[0].substring(0, 2).toUpperCase(); }
+function getAvatarColor(n) { const c = ['#1B4332','#2D6A4F','#40916C','#065F46','#064E3B','#1E3A2F']; let h = 0; for (let i = 0; i < (n||'').length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return c[Math.abs(h) % c.length]; }
+function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+
+function showToast(msg, type = 'success') {
+    const c = document.getElementById('toastContainer');
+    const t = document.createElement('div');
+    t.className = 'toast toast-' + type;
+    const icons = { success: 'fa-check-circle', error: 'fa-times-circle', info: 'fa-info-circle' };
+    t.innerHTML = '<i class="fas ' + (icons[type]||icons.info) + '"></i><span>' + msg + '</span>';
+    c.appendChild(t);
+    setTimeout(() => { t.classList.add('removing'); setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+function animateNumber(el, target) {
+    const dur = 700, start = parseInt(el.textContent) || 0, diff = target - start;
+    if (diff === 0) { el.textContent = target; return; }
+    const st = performance.now();
+    function step(time) { const p = Math.min((time - st) / dur, 1); el.textContent = Math.round(start + diff * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); }
+    requestAnimationFrame(step);
+}
+
+// ==================== AUTH ====================
+async function handleLogin() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const err = document.getElementById('loginError');
+    if (!email || !password) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Email dan kata sandi harus diisi.'; return; }
+
+    try {
+        const { user } = await apiSend('/login', 'POST', { email, password });
+        err.classList.add('hidden');
+        currentUser = user;
+        document.getElementById('headerAvatar').textContent = getInitials(currentUser.nama);
+        document.getElementById('headerName').textContent = currentUser.nama;
+        document.getElementById('dropdownName').textContent = currentUser.nama;
+        document.getElementById('dropdownRole').textContent = currentUser.role;
+        document.getElementById('loginScreen').classList.add('hidden');
+        document.getElementById('mainApp').classList.remove('hidden');
+        await loadAllData();
+        showPage('dashboard');
+    } catch (e) {
+        err.classList.remove('hidden');
+        err.querySelector('span').textContent = e.message;
+    }
+}
+function handleLogout() {
+    currentUser = null;
+    document.getElementById('mainApp').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('loginPassword').value = '';
+    document.getElementById('profileDropdown').classList.add('hidden');
+}
+function toggleProfileMenu() { document.getElementById('profileDropdown').classList.toggle('hidden'); }
+document.addEventListener('click', function(e) {
+    const dd = document.getElementById('profileDropdown'), btn = document.getElementById('profileBtn');
+    if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) dd.classList.add('hidden');
+});
+document.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !document.getElementById('loginScreen').classList.contains('hidden')) handleLogin(); });
+
+// ==================== MUAT DATA DARI DATABASE ====================
+async function loadAllData() {
+    try {
+        [documents, users] = await Promise.all([apiGet('/documents'), apiGet('/users')]);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// ==================== NAVIGASI ====================
+async function showPage(page) {
+    document.querySelectorAll('[id^="page-"]').forEach(el => el.classList.add('hidden'));
+    const t = document.getElementById('page-' + page);
+    if (t) { t.classList.remove('hidden'); t.classList.remove('animate-fade'); void t.offsetWidth; t.classList.add('animate-fade'); }
+    document.querySelectorAll('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.page === page));
+    if (page === 'dashboard') renderDashboard();
+    else if (page === 'dokumen') { docPage = 1; renderDocuments(); }
+    else if (page === 'pengguna') renderUsers();
+}
+
+// ==================== DASHBOARD ====================
+function renderDashboard() {
+    if (currentUser) document.getElementById('welcomeText').textContent = 'Selamat Datang, ' + currentUser.nama;
+    animateNumber(document.getElementById('statDocs'), documents.length);
+
+    const recent = [...documents].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6);
+    let h = '<table class="data-table"><thead><tr><th>Dokumen</th><th class="hide-mobile">Kategori</th><th>Tanggal</th><th class="hide-mobile">Pengunggah</th></tr></thead><tbody>';
+    if (recent.length === 0) {
+        h += '<tr><td colspan="4" class="text-center py-8" style="color:var(--text-muted);">Belum ada dokumen</td></tr>';
+    } else {
+        recent.forEach(d => {
+            h += '<tr><td><div class="flex items-center gap-3"><div class="file-icon">' + getFileIcon(d.file_type) + '</div><span class="font-500 text-sm">' + escapeHtml(d.judul) + '</span></div></td>';
+            h += '<td class="hide-mobile"><span class="badge badge-kategori">' + escapeHtml(d.kategori) + '</span></td>';
+            h += '<td class="text-sm" style="color:var(--text-muted);">' + formatDate(d.tanggal) + '</td>';
+            h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + escapeHtml(d.uploaded_by || '-') + '</td></tr>';
+        });
+    }
+    h += '</tbody></table>';
+    document.getElementById('recentDocsTable').innerHTML = h;
+}
+
+// ==================== DOKUMEN ====================
+function renderDocuments() {
+    const q = (globalSearchQuery || '').toLowerCase().trim();
+    let filtered = documents.filter(d => {
+        if (!q) return true;
+        return d.judul.toLowerCase().includes(q) || d.kategori.toLowerCase().includes(q) || (d.deskripsi||'').toLowerCase().includes(q) || formatDate(d.tanggal).toLowerCase().includes(q);
+    });
+    filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / docPerPage));
+    if (docPage > totalPages) docPage = totalPages;
+    const start = (docPage - 1) * docPerPage;
+    const paged = filtered.slice(start, start + docPerPage);
+
+    let h = '<table class="data-table"><thead><tr><th style="width:40px;">No</th><th>Dokumen</th><th class="hide-mobile">Kategori</th><th>Tanggal</th><th class="hide-mobile">Pengunggah</th><th class="hide-mobile">Ukuran</th><th style="width:160px;">Aksi</th></tr></thead><tbody>';
+    if (paged.length === 0) {
+        h += '<tr><td colspan="7" class="text-center py-12"><div class="empty-state"><i class="fas fa-folder-open block"></i><p class="text-sm">Tidak ada dokumen ditemukan</p></div></td></tr>';
+    } else {
+        paged.forEach((d, i) => {
+            h += '<tr><td class="text-sm" style="color:var(--text-muted);">' + (start + i + 1) + '</td>';
+            h += '<td><div class="flex items-center gap-3"><div class="file-icon">' + getFileIcon(d.file_type) + '</div><div class="min-w-0"><p class="font-500 text-sm truncate max-w-xs">' + escapeHtml(d.judul) + '</p></div></div></td>';
+            h += '<td class="hide-mobile"><span class="badge badge-kategori">' + escapeHtml(d.kategori) + '</span></td>';
+            h += '<td class="text-sm" style="color:var(--text-muted);">' + formatDate(d.tanggal) + '</td>';
+            h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + escapeHtml(d.uploaded_by || '-') + '</td>';
+            h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + formatFileSize(d.file_size) + '</td>';
+            h += '<td><div class="crud-actions">';
+            if (d.file_url) {
+                h += '<button class="crud-btn view" title="Lihat" onclick="previewDocument(' + d.id + ')"><i class="fas fa-eye"></i></button>';
+                h += '<button class="crud-btn download" title="Unduh" onclick="downloadDocument(' + d.id + ')"><i class="fas fa-download"></i></button>';
+            }
+            h += '<button class="crud-btn edit" title="Edit" onclick="openEditDocModal(' + d.id + ')"><i class="fas fa-pen"></i></button>';
+            h += '<button class="crud-btn delete" title="Hapus" onclick="confirmDeleteDoc(' + d.id + ')"><i class="fas fa-trash-alt"></i></button>';
+            h += '</div></td></tr>';
+        });
+    }
+    h += '</tbody></table>';
+    document.getElementById('docsTableContainer').innerHTML = h;
+
+    let ph = '<span class="text-sm" style="color:var(--text-muted);">' + (paged.length === 0 ? 0 : start + 1) + '-' + (start + paged.length) + ' dari ' + filtered.length + '</span><div class="flex gap-1.5">';
+    ph += '<button class="page-btn" onclick="goToPage(' + (docPage - 1) + ')" ' + (docPage <= 1 ? 'disabled' : '') + '><i class="fas fa-chevron-left text-xs"></i></button>';
+    for (let p = 1; p <= totalPages; p++) {
+        if (totalPages > 7 && p !== 1 && p !== totalPages && Math.abs(p - docPage) > 1) { if (p === 2 || p === totalPages - 1) ph += '<span class="page-btn" style="border:none;cursor:default;">...</span>'; continue; }
+        ph += '<button class="page-btn ' + (p === docPage ? 'active' : '') + '" onclick="goToPage(' + p + ')">' + p + '</button>';
+    }
+    ph += '<button class="page-btn" onclick="goToPage(' + (docPage + 1) + ')" ' + (docPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-chevron-right text-xs"></i></button></div>';
+    document.getElementById('docsPagination').innerHTML = ph;
+}
+
+function goToPage(p) { const tp = Math.max(1, Math.ceil(documents.length / docPerPage)); if (p < 1 || p > tp) return; docPage = p; renderDocuments(); }
+
+// ==================== CRUD DOKUMEN ====================
+function openUploadModal() {
+    selectedFile = null;
+    document.getElementById('fileInput').value = '';
+    document.getElementById('uploadJudul').value = '';
+    document.getElementById('uploadKategori').value = '';
+    document.getElementById('uploadTanggal').value = todayStr();
+    document.getElementById('uploadDeskripsi').value = '';
+    const z = document.getElementById('uploadZone'); z.classList.remove('has-file');
+    document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-cloud-upload-alt text-3xl mb-3" style="color:var(--accent);"></i><p class="text-sm font-600 mb-1">Klik atau seret file ke sini</p><p class="text-xs" style="color:var(--text-muted);">PDF, DOCX, XLSX, PPTX, JPG, PNG (Maks. 25MB)</p>';
+    openModal('modalUpload');
+}
+function handleDragOver(e) { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag-over'); }
+function handleDragLeave(e) { e.preventDefault(); document.getElementById('uploadZone').classList.remove('drag-over'); }
+function handleDrop(e) { e.preventDefault(); document.getElementById('uploadZone').classList.remove('drag-over'); if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]); }
+function handleFileSelect(e) { if (e.target.files.length > 0) processFile(e.target.files[0]); }
+
+function processFile(file) {
+    const allowed = ['.pdf','.docx','.doc','.xlsx','.xls','.pptx','.ppt','.jpg','.jpeg','.png'];
+    const ext = '.' + file.name.split('.').pop().toLowerCase();
+    if (!allowed.includes(ext)) { showToast('Tipe file tidak diizinkan.', 'error'); return; }
+    if (file.size > 25 * 1024 * 1024) { showToast('Ukuran file melebihi 25MB.', 'error'); return; }
+    selectedFile = file;
+    document.getElementById('uploadZone').classList.add('has-file');
+    document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-file-check text-3xl mb-3" style="color:var(--primary-light);"></i><p class="text-sm font-600 mb-1">' + escapeHtml(file.name) + '</p><p class="text-xs" style="color:var(--text-muted);">' + formatFileSize(file.size) + ' &mdash; Klik untuk ganti</p>';
+    if (!document.getElementById('uploadJudul').value.trim()) document.getElementById('uploadJudul').value = file.name.replace(/\.[^/.]+$/, '');
+}
+
+async function handleUpload() {
+    const judul = document.getElementById('uploadJudul').value.trim();
+    const kategori = document.getElementById('uploadKategori').value.trim();
+    const tanggal = document.getElementById('uploadTanggal').value;
+    const deskripsi = document.getElementById('uploadDeskripsi').value.trim();
+    if (!judul) { showToast('Judul dokumen wajib diisi.', 'error'); return; }
+    if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
+    if (!tanggal) { showToast('Tanggal dokumen wajib diisi.', 'error'); return; }
+
+    // CATATAN: penyimpanan file fisik butuh layanan terpisah (mis. Vercel Blob / S3).
+    // Bagian ini baru menyimpan METADATA dokumen ke MySQL.
+    try {
+        await apiSend('/documents', 'POST', {
+            judul, deskripsi, kategori, tanggal,
+            uploaded_by: currentUser ? currentUser.nama : 'Sistem',
+            file_name: selectedFile ? selectedFile.name : null,
+            file_type: selectedFile ? selectedFile.type : null,
+            file_size: selectedFile ? selectedFile.size : null,
+            file_url: null
+        });
+        closeModal('modalUpload');
+        showToast('Dokumen "' + judul + '" berhasil diunggah.');
+        await loadAllData();
+        if (!document.getElementById('page-dokumen').classList.contains('hidden')) renderDocuments();
+        renderDashboard();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function openEditDocModal(id) {
+    const d = documents.find(x => x.id === id); if (!d) return;
+    document.getElementById('editDocId').value = id;
+    document.getElementById('editDocJudul').value = d.judul;
+    document.getElementById('editDocKategori').value = d.kategori;
+    document.getElementById('editDocTanggal').value = d.tanggal ? d.tanggal.split('T')[0] : '';
+    document.getElementById('editDocDeskripsi').value = d.deskripsi || '';
+    openModal('modalEditDoc');
+}
+async function handleEditDoc() {
+    const id = parseInt(document.getElementById('editDocId').value);
+    const judul = document.getElementById('editDocJudul').value.trim();
+    const kategori = document.getElementById('editDocKategori').value.trim();
+    if (!judul) { showToast('Judul wajib diisi.', 'error'); return; }
+    if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
+    try {
+        await apiSend('/documents/' + id, 'PUT', {
+            judul, kategori,
+            tanggal: document.getElementById('editDocTanggal').value,
+            deskripsi: document.getElementById('editDocDeskripsi').value.trim()
+        });
+        closeModal('modalEditDoc'); showToast('Dokumen berhasil diperbarui.');
+        await loadAllData(); renderDocuments(); renderDashboard();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+function confirmDeleteDoc(id) {
+    const d = documents.find(x => x.id === id); if (!d) return;
+    document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus dokumen "' + d.judul + '"?';
+    deleteCallback = async function() {
+        try {
+            await apiSend('/documents/' + id, 'DELETE');
+            closeModal('modalDelete'); showToast('Dokumen berhasil dihapus.', 'success');
+            await loadAllData(); renderDocuments(); renderDashboard();
+        } catch (e) { showToast(e.message, 'error'); }
+    };
+    openModal('modalDelete');
+}
+function executeDelete() { if (typeof deleteCallback === 'function') deleteCallback(); deleteCallback = null; }
+
+function previewDocument(id) {
+    const d = documents.find(x => x.id === id);
+    if (!d || !d.file_url) { showToast('File tidak tersedia.', 'error'); return; }
+    document.getElementById('previewTitle').textContent = d.judul;
+    const c = document.getElementById('previewContent');
+    if ((d.file_type || '').includes('image')) c.innerHTML = '<img src="' + d.file_url + '" style="display:block;margin:0 auto;max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;">';
+    else if ((d.file_type || '').includes('pdf')) c.innerHTML = '<iframe src="' + d.file_url + '" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>';
+    else c.innerHTML = '<div class="text-center py-8"><i class="fas fa-file-alt text-4xl mb-4" style="color:var(--text-muted);opacity:0.3;"></i><p class="text-sm mb-4" style="color:var(--text-muted);">Preview tidak tersedia untuk tipe file ini.</p><button onclick="downloadDocument(' + id + ')" class="btn btn-primary"><i class="fas fa-download"></i> Unduh File</button></div>';
+    openModal('modalPreview');
+}
+function downloadDocument(id) {
+    const d = documents.find(x => x.id === id);
+    if (!d || !d.file_url) { showToast('File tidak tersedia.', 'error'); return; }
+    const a = document.createElement('a'); a.href = d.file_url; a.download = d.file_name || 'dokumen'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    showToast('Mengunduh "' + (d.file_name || 'file') + '"...', 'info');
+}
+
+// ==================== PENGGUNA ====================
+function renderUsers() {
+    let h = '<table class="data-table"><thead><tr><th style="width:40px;">No</th><th>Pengguna</th><th>Email</th><th>Role</th><th>Status</th><th style="width:100px;">Aksi</th></tr></thead><tbody>';
+    if (users.length === 0) {
+        h += '<tr><td colspan="6" class="text-center py-12"><div class="empty-state"><i class="fas fa-users block"></i><p class="text-sm">Belum ada pengguna</p></div></td></tr>';
+    } else {
+        users.forEach((u, i) => {
+            const isA = u.role === 'Admin';
+            h += '<tr><td class="text-sm" style="color:var(--text-muted);">' + (i + 1) + '</td>';
+            h += '<td><div class="flex items-center gap-3"><div class="avatar text-xs text-white" style="background:' + getAvatarColor(u.nama) + ';">' + getInitials(u.nama) + '</div><span class="font-500 text-sm">' + escapeHtml(u.nama) + '</span></div></td>';
+            h += '<td class="text-sm" style="color:var(--text-muted);">' + escapeHtml(u.email) + '</td>';
+            h += '<td><span class="badge ' + (isA ? 'badge-admin' : 'badge-pengurus') + '">' + u.role + '</span></td>';
+            h += '<td><div class="flex items-center gap-2"><span class="status-dot" style="background:' + (u.status === 'Aktif' ? '#059669' : '#9CA3AF') + ';"></span><span class="text-sm">' + u.status + '</span></div></td>';
+            h += '<td><div class="crud-actions">';
+            h += '<button class="crud-btn edit" title="Edit" onclick="openEditUserModal(' + u.id + ')"><i class="fas fa-pen"></i></button>';
+            if (!isA) h += '<button class="crud-btn delete" title="Hapus" onclick="confirmDeleteUser(' + u.id + ')"><i class="fas fa-trash-alt"></i></button>';
+            h += '</div></td></tr>';
+        });
+    }
+    h += '</tbody></table>';
+    document.getElementById('usersTableContainer').innerHTML = h;
+}
+
+function openAddUserModal() {
+    document.getElementById('addUserName').value = ''; document.getElementById('addUserEmail').value = '';
+    document.getElementById('addUserPassword').value = '';
+    document.getElementById('addUserRole').value = 'Pengurus'; document.getElementById('addUserStatus').value = 'Aktif';
+    openModal('modalAddUser');
+}
+async function handleAddUser() {
+    const nama = document.getElementById('addUserName').value.trim();
+    const email = document.getElementById('addUserEmail').value.trim();
+    const password = document.getElementById('addUserPassword').value;
+    const role = document.getElementById('addUserRole').value;
+    const status = document.getElementById('addUserStatus').value;
+    if (!nama) { showToast('Nama wajib diisi.', 'error'); return; }
+    if (!email || !email.includes('@')) { showToast('Email tidak valid.', 'error'); return; }
+    if (!password) { showToast('Kata sandi wajib diisi.', 'error'); return; }
+    try {
+        await apiSend('/users', 'POST', { nama, email, password, role, status });
+        closeModal('modalAddUser'); showToast('Pengurus "' + nama + '" berhasil ditambahkan.');
+        await loadAllData(); renderUsers(); renderDashboard();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+function openEditUserModal(id) {
+    const u = users.find(x => x.id === id); if (!u) return;
+    document.getElementById('editUserId').value = id; document.getElementById('editUserName').value = u.nama;
+    document.getElementById('editUserEmail').value = u.email; document.getElementById('editUserRole').value = u.role;
+    document.getElementById('editUserStatus').value = u.status; openModal('modalEditUser');
+}
+async function handleEditUser() {
+    const id = parseInt(document.getElementById('editUserId').value);
+    const nama = document.getElementById('editUserName').value.trim();
+    const email = document.getElementById('editUserEmail').value.trim();
+    if (!nama) { showToast('Nama wajib diisi.', 'error'); return; }
+    if (!email || !email.includes('@')) { showToast('Email tidak valid.', 'error'); return; }
+    try {
+        await apiSend('/users/' + id, 'PUT', {
+            nama, email,
+            role: document.getElementById('editUserRole').value,
+            status: document.getElementById('editUserStatus').value
+        });
+        closeModal('modalEditUser'); showToast('Data pengguna berhasil diperbarui.');
+        await loadAllData(); renderUsers(); renderDashboard();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+function confirmDeleteUser(id) {
+    const u = users.find(x => x.id === id); if (!u) return;
+    if (u.role === 'Admin') { showToast('Akun Admin tidak dapat dihapus.', 'error'); return; }
+    document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus pengguna "' + u.nama + '"?';
+    deleteCallback = async function() {
+        try {
+            await apiSend('/users/' + id, 'DELETE');
+            closeModal('modalDelete'); showToast('Pengguna "' + u.nama + '" berhasil dihapus.', 'success');
+            await loadAllData(); renderUsers(); renderDashboard();
+        } catch (e) { showToast(e.message, 'error'); }
+    };
+    openModal('modalDelete');
+}
+
+// ==================== PENCARIAN GLOBAL ====================
+function handleGlobalSearch(q) {
+    globalSearchQuery = q;
+    if (!document.getElementById('page-dokumen').classList.contains('hidden')) { docPage = 1; renderDocuments(); }
+    else if (q.trim().length > 0) { showPage('dokumen'); }
+}
+
+// ==================== INIT ====================
+document.getElementById('footerYear').textContent = new Date().getFullYear();
