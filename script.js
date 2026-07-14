@@ -230,23 +230,30 @@ async function handleUpload() {
     if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
     if (!tanggal) { showToast('Tanggal dokumen wajib diisi.', 'error'); return; }
 
-    let file_url = null, file_name = null, file_type = null, file_size = null;
+    let file_url = null, file_name = null, file_type = null, file_size = null, file_id = null, download_url = null;
 
     if (selectedFile) {
-        const path = Date.now() + '_' + selectedFile.name.replace(/\s+/g, '_');
-        const { error: upErr } = await sb.storage.from('arsip').upload(path, selectedFile);
-        if (upErr) { showToast('Gagal upload file: ' + upErr.message, 'error'); return; }
-        const { data: pub } = sb.storage.from('arsip').getPublicUrl(path);
-        file_url = pub.publicUrl;
-        file_name = selectedFile.name;
-        file_type = selectedFile.type;
-        file_size = selectedFile.size;
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        try {
+            const r = await fetch('/api/upload-drive', { method: 'POST', body: formData });
+            const result = await r.json();
+            if (!r.ok) { showToast('Gagal upload file: ' + result.error, 'error'); return; }
+            file_url = result.file_url;
+            file_id = result.file_id;
+            download_url = result.download_url;
+            file_name = selectedFile.name;
+            file_type = selectedFile.type;
+            file_size = selectedFile.size;
+        } catch (e) {
+            showToast('Gagal upload file: ' + e.message, 'error'); return;
+        }
     }
 
     const { error } = await sb.from('documents').insert({
         judul, deskripsi, kategori, tanggal,
         uploaded_by: currentUser ? currentUser.id : null,
-        file_name, file_url, file_type, file_size
+        file_name, file_url, file_type, file_size, file_id, download_url
     });
     if (error) { showToast(error.message, 'error'); return; }
 
@@ -300,16 +307,21 @@ function previewDocument(id) {
     if (!d || !d.file_url) { showToast('File tidak tersedia.', 'error'); return; }
     document.getElementById('previewTitle').textContent = d.judul;
     const c = document.getElementById('previewContent');
-    if ((d.file_type || '').includes('image')) c.innerHTML = '<img src="' + d.file_url + '" style="display:block;margin:0 auto;max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;">';
-    else if ((d.file_type || '').includes('pdf')) c.innerHTML = '<iframe src="' + d.file_url + '" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>';
-    else c.innerHTML = '<div class="text-center py-8"><i class="fas fa-file-alt text-4xl mb-4" style="color:var(--text-muted);opacity:0.3;"></i><p class="text-sm mb-4" style="color:var(--text-muted);">Preview tidak tersedia untuk tipe file ini.</p><button onclick="downloadDocument(' + id + ')" class="btn btn-primary"><i class="fas fa-download"></i> Unduh File</button></div>';
+    if ((d.file_type || '').includes('image') && d.download_url) {
+        c.innerHTML = '<img src="' + d.download_url + '" style="display:block;margin:0 auto;max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;">';
+    } else if (d.file_id) {
+        c.innerHTML = '<iframe src="https://drive.google.com/file/d/' + d.file_id + '/preview" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>';
+    } else {
+        c.innerHTML = '<div class="text-center py-8"><i class="fas fa-file-alt text-4xl mb-4" style="color:var(--text-muted);opacity:0.3;"></i><p class="text-sm mb-4" style="color:var(--text-muted);">Preview tidak tersedia untuk tipe file ini.</p><button onclick="downloadDocument(' + id + ')" class="btn btn-primary"><i class="fas fa-download"></i> Unduh File</button></div>';
+    }
     openModal('modalPreview');
 }
 function downloadDocument(id) {
     const d = documents.find(x => x.id === id);
     if (!d || !d.file_url) { showToast('File tidak tersedia.', 'error'); return; }
-    const a = document.createElement('a'); a.href = d.file_url; a.download = d.file_name || 'dokumen'; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    showToast('Mengunduh "' + (d.file_name || 'file') + '"...', 'info');
+    const link = d.download_url || d.file_url;
+    window.open(link, '_blank');
+    showToast('Membuka "' + (d.file_name || 'file') + '"...', 'info');
 }
 
 // ==================== PENGGUNA ====================
