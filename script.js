@@ -1,5 +1,7 @@
-// ==================== KONFIGURASI ====================
-const API_BASE = '/api'; // otomatis mengarah ke folder /api di domain Vercel yang sama
+const SUPABASE_URL = 'https://yjmlbytfsxgsjhvmoyvh.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqbWxieXRmc3hnc2podm1veXZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTMwMzAsImV4cCI6MjA5OTUyOTAzMH0.uxJMqH5_7Xga5_iFed0v-NnLr3Q4FrM7eo0hs56YFpQ';
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let deleteCallback = null;
@@ -9,23 +11,6 @@ let users = [];
 let docPage = 1;
 const docPerPage = 8;
 let globalSearchQuery = '';
-
-// ==================== HELPER FETCH ====================
-async function apiGet(path) {
-    const r = await fetch(API_BASE + path);
-    if (!r.ok) throw new Error((await r.json()).error || 'Gagal mengambil data');
-    return r.json();
-}
-async function apiSend(path, method, body) {
-    const r = await fetch(API_BASE + path, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || 'Terjadi kesalahan');
-    return data;
-}
 
 // ==================== UTILITAS ====================
 function formatDate(s) {
@@ -51,6 +36,7 @@ function getFileIcon(t) {
 }
 function getInitials(n) { if (!n) return '??'; const p = n.trim().split(/\s+/); return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : p[0].substring(0, 2).toUpperCase(); }
 function getAvatarColor(n) { const c = ['#1B4332','#2D6A4F','#40916C','#065F46','#064E3B','#1E3A2F']; let h = 0; for (let i = 0; i < (n||'').length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return c[Math.abs(h) % c.length]; }
+function getUploaderName(id) { if (!id) return 'Sistem'; const u = users.find(x => x.id === id); return u ? u.nama : '-'; }
 function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 
@@ -63,10 +49,8 @@ function showToast(msg, type = 'success') {
     c.appendChild(t);
     setTimeout(() => { t.classList.add('removing'); setTimeout(() => t.remove(), 300); }, 3000);
 }
-
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
-
 function animateNumber(el, target) {
     const dur = 700, start = parseInt(el.textContent) || 0, diff = target - start;
     if (diff === 0) { el.textContent = target; return; }
@@ -82,22 +66,27 @@ async function handleLogin() {
     const err = document.getElementById('loginError');
     if (!email || !password) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Email dan kata sandi harus diisi.'; return; }
 
-    try {
-        const { user } = await apiSend('/login', 'POST', { email, password });
-        err.classList.add('hidden');
-        currentUser = user;
-        document.getElementById('headerAvatar').textContent = getInitials(currentUser.nama);
-        document.getElementById('headerName').textContent = currentUser.nama;
-        document.getElementById('dropdownName').textContent = currentUser.nama;
-        document.getElementById('dropdownRole').textContent = currentUser.role;
-        document.getElementById('loginScreen').classList.add('hidden');
-        document.getElementById('mainApp').classList.remove('hidden');
-        await loadAllData();
-        showPage('dashboard');
-    } catch (e) {
-        err.classList.remove('hidden');
-        err.querySelector('span').textContent = e.message;
-    }
+    const { data, error } = await supabase
+        .from('users')
+        .select('id, nama, email, role, status')
+        .eq('email', email)
+        .eq('password', password)
+        .limit(1);
+
+    if (error) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Gagal terhubung ke database: ' + error.message; return; }
+    if (!data || data.length === 0) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Email atau kata sandi salah.'; return; }
+    if (data[0].status === 'Nonaktif') { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Akun nonaktif.'; return; }
+
+    err.classList.add('hidden');
+    currentUser = data[0];
+    document.getElementById('headerAvatar').textContent = getInitials(currentUser.nama);
+    document.getElementById('headerName').textContent = currentUser.nama;
+    document.getElementById('dropdownName').textContent = currentUser.nama;
+    document.getElementById('dropdownRole').textContent = currentUser.role;
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('mainApp').classList.remove('hidden');
+    await loadAllData();
+    showPage('dashboard');
 }
 function handleLogout() {
     currentUser = null;
@@ -113,17 +102,18 @@ document.addEventListener('click', function(e) {
 });
 document.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !document.getElementById('loginScreen').classList.contains('hidden')) handleLogin(); });
 
-// ==================== MUAT DATA DARI DATABASE ====================
+// ==================== MUAT DATA ====================
 async function loadAllData() {
-    try {
-        [documents, users] = await Promise.all([apiGet('/documents'), apiGet('/users')]);
-    } catch (e) {
-        showToast(e.message, 'error');
-    }
+    const [docsRes, usersRes] = await Promise.all([
+        supabase.from('documents').select('*').order('created_at', { ascending: false }),
+        supabase.from('users').select('*').order('id', { ascending: true })
+    ]);
+    if (docsRes.error) showToast(docsRes.error.message, 'error'); else documents = docsRes.data;
+    if (usersRes.error) showToast(usersRes.error.message, 'error'); else users = usersRes.data;
 }
 
 // ==================== NAVIGASI ====================
-async function showPage(page) {
+function showPage(page) {
     document.querySelectorAll('[id^="page-"]').forEach(el => el.classList.add('hidden'));
     const t = document.getElementById('page-' + page);
     if (t) { t.classList.remove('hidden'); t.classList.remove('animate-fade'); void t.offsetWidth; t.classList.add('animate-fade'); }
@@ -137,8 +127,7 @@ async function showPage(page) {
 function renderDashboard() {
     if (currentUser) document.getElementById('welcomeText').textContent = 'Selamat Datang, ' + currentUser.nama;
     animateNumber(document.getElementById('statDocs'), documents.length);
-
-    const recent = [...documents].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6);
+    const recent = [...documents].slice(0, 6);
     let h = '<table class="data-table"><thead><tr><th>Dokumen</th><th class="hide-mobile">Kategori</th><th>Tanggal</th><th class="hide-mobile">Pengunggah</th></tr></thead><tbody>';
     if (recent.length === 0) {
         h += '<tr><td colspan="4" class="text-center py-8" style="color:var(--text-muted);">Belum ada dokumen</td></tr>';
@@ -147,7 +136,7 @@ function renderDashboard() {
             h += '<tr><td><div class="flex items-center gap-3"><div class="file-icon">' + getFileIcon(d.file_type) + '</div><span class="font-500 text-sm">' + escapeHtml(d.judul) + '</span></div></td>';
             h += '<td class="hide-mobile"><span class="badge badge-kategori">' + escapeHtml(d.kategori) + '</span></td>';
             h += '<td class="text-sm" style="color:var(--text-muted);">' + formatDate(d.tanggal) + '</td>';
-            h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + escapeHtml(d.uploaded_by || '-') + '</td></tr>';
+            h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + escapeHtml(getUploaderName(d.uploaded_by)) + '</td></tr>';
         });
     }
     h += '</tbody></table>';
@@ -161,7 +150,6 @@ function renderDocuments() {
         if (!q) return true;
         return d.judul.toLowerCase().includes(q) || d.kategori.toLowerCase().includes(q) || (d.deskripsi||'').toLowerCase().includes(q) || formatDate(d.tanggal).toLowerCase().includes(q);
     });
-    filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / docPerPage));
     if (docPage > totalPages) docPage = totalPages;
@@ -177,7 +165,7 @@ function renderDocuments() {
             h += '<td><div class="flex items-center gap-3"><div class="file-icon">' + getFileIcon(d.file_type) + '</div><div class="min-w-0"><p class="font-500 text-sm truncate max-w-xs">' + escapeHtml(d.judul) + '</p></div></div></td>';
             h += '<td class="hide-mobile"><span class="badge badge-kategori">' + escapeHtml(d.kategori) + '</span></td>';
             h += '<td class="text-sm" style="color:var(--text-muted);">' + formatDate(d.tanggal) + '</td>';
-            h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + escapeHtml(d.uploaded_by || '-') + '</td>';
+            h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + escapeHtml(getUploaderName(d.uploaded_by)) + '</td>';
             h += '<td class="text-sm hide-mobile" style="color:var(--text-muted);">' + formatFileSize(d.file_size) + '</td>';
             h += '<td><div class="crud-actions">';
             if (d.file_url) {
@@ -201,7 +189,6 @@ function renderDocuments() {
     ph += '<button class="page-btn" onclick="goToPage(' + (docPage + 1) + ')" ' + (docPage >= totalPages ? 'disabled' : '') + '><i class="fas fa-chevron-right text-xs"></i></button></div>';
     document.getElementById('docsPagination').innerHTML = ph;
 }
-
 function goToPage(p) { const tp = Math.max(1, Math.ceil(documents.length / docPerPage)); if (p < 1 || p > tp) return; docPage = p; renderDocuments(); }
 
 // ==================== CRUD DOKUMEN ====================
@@ -241,25 +228,31 @@ async function handleUpload() {
     if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
     if (!tanggal) { showToast('Tanggal dokumen wajib diisi.', 'error'); return; }
 
-    // CATATAN: penyimpanan file fisik butuh layanan terpisah (mis. Vercel Blob / S3).
-    // Bagian ini baru menyimpan METADATA dokumen ke MySQL.
-    try {
-        await apiSend('/documents', 'POST', {
-            judul, deskripsi, kategori, tanggal,
-            uploaded_by: currentUser ? currentUser.nama : 'Sistem',
-            file_name: selectedFile ? selectedFile.name : null,
-            file_type: selectedFile ? selectedFile.type : null,
-            file_size: selectedFile ? selectedFile.size : null,
-            file_url: null
-        });
-        closeModal('modalUpload');
-        showToast('Dokumen "' + judul + '" berhasil diunggah.');
-        await loadAllData();
-        if (!document.getElementById('page-dokumen').classList.contains('hidden')) renderDocuments();
-        renderDashboard();
-    } catch (e) {
-        showToast(e.message, 'error');
+    let file_url = null, file_name = null, file_type = null, file_size = null;
+
+    if (selectedFile) {
+        const path = Date.now() + '_' + selectedFile.name.replace(/\s+/g, '_');
+        const { error: upErr } = await supabase.storage.from('arsip').upload(path, selectedFile);
+        if (upErr) { showToast('Gagal upload file: ' + upErr.message, 'error'); return; }
+        const { data: pub } = supabase.storage.from('arsip').getPublicUrl(path);
+        file_url = pub.publicUrl;
+        file_name = selectedFile.name;
+        file_type = selectedFile.type;
+        file_size = selectedFile.size;
     }
+
+    const { error } = await supabase.from('documents').insert({
+        judul, deskripsi, kategori, tanggal,
+        uploaded_by: currentUser ? currentUser.id : null,
+        file_name, file_url, file_type, file_size
+    });
+    if (error) { showToast(error.message, 'error'); return; }
+
+    closeModal('modalUpload');
+    showToast('Dokumen "' + judul + '" berhasil diunggah.');
+    await loadAllData();
+    if (!document.getElementById('page-dokumen').classList.contains('hidden')) renderDocuments();
+    renderDashboard();
 }
 
 function openEditDocModal(id) {
@@ -277,26 +270,24 @@ async function handleEditDoc() {
     const kategori = document.getElementById('editDocKategori').value.trim();
     if (!judul) { showToast('Judul wajib diisi.', 'error'); return; }
     if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
-    try {
-        await apiSend('/documents/' + id, 'PUT', {
-            judul, kategori,
-            tanggal: document.getElementById('editDocTanggal').value,
-            deskripsi: document.getElementById('editDocDeskripsi').value.trim()
-        });
-        closeModal('modalEditDoc'); showToast('Dokumen berhasil diperbarui.');
-        await loadAllData(); renderDocuments(); renderDashboard();
-    } catch (e) { showToast(e.message, 'error'); }
+    const { error } = await supabase.from('documents').update({
+        judul, kategori,
+        tanggal: document.getElementById('editDocTanggal').value,
+        deskripsi: document.getElementById('editDocDeskripsi').value.trim()
+    }).eq('id', id);
+    if (error) { showToast(error.message, 'error'); return; }
+    closeModal('modalEditDoc'); showToast('Dokumen berhasil diperbarui.');
+    await loadAllData(); renderDocuments(); renderDashboard();
 }
 
 function confirmDeleteDoc(id) {
     const d = documents.find(x => x.id === id); if (!d) return;
     document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus dokumen "' + d.judul + '"?';
     deleteCallback = async function() {
-        try {
-            await apiSend('/documents/' + id, 'DELETE');
-            closeModal('modalDelete'); showToast('Dokumen berhasil dihapus.', 'success');
-            await loadAllData(); renderDocuments(); renderDashboard();
-        } catch (e) { showToast(e.message, 'error'); }
+        const { error } = await supabase.from('documents').delete().eq('id', id);
+        if (error) { showToast(error.message, 'error'); return; }
+        closeModal('modalDelete'); showToast('Dokumen berhasil dihapus.', 'success');
+        await loadAllData(); renderDocuments(); renderDashboard();
     };
     openModal('modalDelete');
 }
@@ -315,7 +306,7 @@ function previewDocument(id) {
 function downloadDocument(id) {
     const d = documents.find(x => x.id === id);
     if (!d || !d.file_url) { showToast('File tidak tersedia.', 'error'); return; }
-    const a = document.createElement('a'); a.href = d.file_url; a.download = d.file_name || 'dokumen'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    const a = document.createElement('a'); a.href = d.file_url; a.download = d.file_name || 'dokumen'; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
     showToast('Mengunduh "' + (d.file_name || 'file') + '"...', 'info');
 }
 
@@ -326,12 +317,12 @@ function renderUsers() {
         h += '<tr><td colspan="6" class="text-center py-12"><div class="empty-state"><i class="fas fa-users block"></i><p class="text-sm">Belum ada pengguna</p></div></td></tr>';
     } else {
         users.forEach((u, i) => {
-            const isA = u.role === 'Admin';
+            const isA = (u.role || '').toLowerCase() === 'admin';
             h += '<tr><td class="text-sm" style="color:var(--text-muted);">' + (i + 1) + '</td>';
             h += '<td><div class="flex items-center gap-3"><div class="avatar text-xs text-white" style="background:' + getAvatarColor(u.nama) + ';">' + getInitials(u.nama) + '</div><span class="font-500 text-sm">' + escapeHtml(u.nama) + '</span></div></td>';
             h += '<td class="text-sm" style="color:var(--text-muted);">' + escapeHtml(u.email) + '</td>';
             h += '<td><span class="badge ' + (isA ? 'badge-admin' : 'badge-pengurus') + '">' + u.role + '</span></td>';
-            h += '<td><div class="flex items-center gap-2"><span class="status-dot" style="background:' + (u.status === 'Aktif' ? '#059669' : '#9CA3AF') + ';"></span><span class="text-sm">' + u.status + '</span></div></td>';
+            h += '<td><div class="flex items-center gap-2"><span class="status-dot" style="background:' + (u.status === 'Aktif' ? '#059669' : '#9CA3AF') + ';"></span><span class="text-sm">' + (u.status || 'Aktif') + '</span></div></td>';
             h += '<td><div class="crud-actions">';
             h += '<button class="crud-btn edit" title="Edit" onclick="openEditUserModal(' + u.id + ')"><i class="fas fa-pen"></i></button>';
             if (!isA) h += '<button class="crud-btn delete" title="Hapus" onclick="confirmDeleteUser(' + u.id + ')"><i class="fas fa-trash-alt"></i></button>';
@@ -357,17 +348,20 @@ async function handleAddUser() {
     if (!nama) { showToast('Nama wajib diisi.', 'error'); return; }
     if (!email || !email.includes('@')) { showToast('Email tidak valid.', 'error'); return; }
     if (!password) { showToast('Kata sandi wajib diisi.', 'error'); return; }
-    try {
-        await apiSend('/users', 'POST', { nama, email, password, role, status });
-        closeModal('modalAddUser'); showToast('Pengurus "' + nama + '" berhasil ditambahkan.');
-        await loadAllData(); renderUsers(); renderDashboard();
-    } catch (e) { showToast(e.message, 'error'); }
+
+    const { data: dupe } = await supabase.from('users').select('id').eq('email', email);
+    if (dupe && dupe.length > 0) { showToast('Email sudah terdaftar.', 'error'); return; }
+
+    const { error } = await supabase.from('users').insert({ nama, email, password, role, status });
+    if (error) { showToast(error.message, 'error'); return; }
+    closeModal('modalAddUser'); showToast('Pengurus "' + nama + '" berhasil ditambahkan.');
+    await loadAllData(); renderUsers(); renderDashboard();
 }
 function openEditUserModal(id) {
     const u = users.find(x => x.id === id); if (!u) return;
     document.getElementById('editUserId').value = id; document.getElementById('editUserName').value = u.nama;
     document.getElementById('editUserEmail').value = u.email; document.getElementById('editUserRole').value = u.role;
-    document.getElementById('editUserStatus').value = u.status; openModal('modalEditUser');
+    document.getElementById('editUserStatus').value = u.status || 'Aktif'; openModal('modalEditUser');
 }
 async function handleEditUser() {
     const id = parseInt(document.getElementById('editUserId').value);
@@ -375,26 +369,28 @@ async function handleEditUser() {
     const email = document.getElementById('editUserEmail').value.trim();
     if (!nama) { showToast('Nama wajib diisi.', 'error'); return; }
     if (!email || !email.includes('@')) { showToast('Email tidak valid.', 'error'); return; }
-    try {
-        await apiSend('/users/' + id, 'PUT', {
-            nama, email,
-            role: document.getElementById('editUserRole').value,
-            status: document.getElementById('editUserStatus').value
-        });
-        closeModal('modalEditUser'); showToast('Data pengguna berhasil diperbarui.');
-        await loadAllData(); renderUsers(); renderDashboard();
-    } catch (e) { showToast(e.message, 'error'); }
+
+    const { data: dupe } = await supabase.from('users').select('id').eq('email', email).neq('id', id);
+    if (dupe && dupe.length > 0) { showToast('Email sudah digunakan.', 'error'); return; }
+
+    const { error } = await supabase.from('users').update({
+        nama, email,
+        role: document.getElementById('editUserRole').value,
+        status: document.getElementById('editUserStatus').value
+    }).eq('id', id);
+    if (error) { showToast(error.message, 'error'); return; }
+    closeModal('modalEditUser'); showToast('Data pengguna berhasil diperbarui.');
+    await loadAllData(); renderUsers(); renderDashboard();
 }
 function confirmDeleteUser(id) {
     const u = users.find(x => x.id === id); if (!u) return;
-    if (u.role === 'Admin') { showToast('Akun Admin tidak dapat dihapus.', 'error'); return; }
+    if ((u.role || '').toLowerCase() === 'admin') { showToast('Akun Admin tidak dapat dihapus.', 'error'); return; }
     document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus pengguna "' + u.nama + '"?';
     deleteCallback = async function() {
-        try {
-            await apiSend('/users/' + id, 'DELETE');
-            closeModal('modalDelete'); showToast('Pengguna "' + u.nama + '" berhasil dihapus.', 'success');
-            await loadAllData(); renderUsers(); renderDashboard();
-        } catch (e) { showToast(e.message, 'error'); }
+        const { error } = await supabase.from('users').delete().eq('id', id);
+        if (error) { showToast(error.message, 'error'); return; }
+        closeModal('modalDelete'); showToast('Pengguna "' + u.nama + '" berhasil dihapus.', 'success');
+        await loadAllData(); renderUsers(); renderDashboard();
     };
     openModal('modalDelete');
 }
