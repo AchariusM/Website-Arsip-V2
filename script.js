@@ -193,7 +193,6 @@ function renderDocuments() {
 }
 function goToPage(p) { const tp = Math.max(1, Math.ceil(documents.length / docPerPage)); if (p < 1 || p > tp) return; docPage = p; renderDocuments(); }
 
-// ==================== CRUD DOKUMEN ====================
 function openUploadModal() {
     selectedFile = null;
     document.getElementById('fileInput').value = '';
@@ -407,9 +406,8 @@ function confirmDeleteUser(id) {
         await loadAllData(); renderUsers(); renderDashboard();
     };
     openModal('modalDelete');
-}
+} 
 
-// ==================== PENCARIAN GLOBAL ====================
 function handleGlobalSearch(q) {
     globalSearchQuery = q;
     if (!document.getElementById('page-dokumen').classList.contains('hidden')) { docPage = 1; renderDocuments(); }
