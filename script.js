@@ -1,7 +1,9 @@
+// ==================== KONFIGURASI SUPABASE ====================
+// Ganti dua baris di bawah ini dengan milik Anda (Project Settings -> API)
 const SUPABASE_URL = 'https://yjmlbytfsxgsjhvmoyvh.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqbWxieXRmc3hnc2podm1veXZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTMwMzAsImV4cCI6MjA5OTUyOTAzMH0.uxJMqH5_7Xga5_iFed0v-NnLr3Q4FrM7eo0hs56YFpQ';
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let deleteCallback = null;
@@ -66,7 +68,7 @@ async function handleLogin() {
     const err = document.getElementById('loginError');
     if (!email || !password) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Email dan kata sandi harus diisi.'; return; }
 
-    const { data, error } = await supabase
+    const { data, error } = await sb
         .from('users')
         .select('id, nama, email, role, status')
         .eq('email', email)
@@ -105,8 +107,8 @@ document.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !doc
 // ==================== MUAT DATA ====================
 async function loadAllData() {
     const [docsRes, usersRes] = await Promise.all([
-        supabase.from('documents').select('*').order('created_at', { ascending: false }),
-        supabase.from('users').select('*').order('id', { ascending: true })
+        sb.from('documents').select('*').order('created_at', { ascending: false }),
+        sb.from('users').select('*').order('id', { ascending: true })
     ]);
     if (docsRes.error) showToast(docsRes.error.message, 'error'); else documents = docsRes.data;
     if (usersRes.error) showToast(usersRes.error.message, 'error'); else users = usersRes.data;
@@ -232,16 +234,16 @@ async function handleUpload() {
 
     if (selectedFile) {
         const path = Date.now() + '_' + selectedFile.name.replace(/\s+/g, '_');
-        const { error: upErr } = await supabase.storage.from('arsip').upload(path, selectedFile);
+        const { error: upErr } = await sb.storage.from('arsip').upload(path, selectedFile);
         if (upErr) { showToast('Gagal upload file: ' + upErr.message, 'error'); return; }
-        const { data: pub } = supabase.storage.from('arsip').getPublicUrl(path);
+        const { data: pub } = sb.storage.from('arsip').getPublicUrl(path);
         file_url = pub.publicUrl;
         file_name = selectedFile.name;
         file_type = selectedFile.type;
         file_size = selectedFile.size;
     }
 
-    const { error } = await supabase.from('documents').insert({
+    const { error } = await sb.from('documents').insert({
         judul, deskripsi, kategori, tanggal,
         uploaded_by: currentUser ? currentUser.id : null,
         file_name, file_url, file_type, file_size
@@ -270,7 +272,7 @@ async function handleEditDoc() {
     const kategori = document.getElementById('editDocKategori').value.trim();
     if (!judul) { showToast('Judul wajib diisi.', 'error'); return; }
     if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
-    const { error } = await supabase.from('documents').update({
+    const { error } = await sb.from('documents').update({
         judul, kategori,
         tanggal: document.getElementById('editDocTanggal').value,
         deskripsi: document.getElementById('editDocDeskripsi').value.trim()
@@ -284,7 +286,7 @@ function confirmDeleteDoc(id) {
     const d = documents.find(x => x.id === id); if (!d) return;
     document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus dokumen "' + d.judul + '"?';
     deleteCallback = async function() {
-        const { error } = await supabase.from('documents').delete().eq('id', id);
+        const { error } = await sb.from('documents').delete().eq('id', id);
         if (error) { showToast(error.message, 'error'); return; }
         closeModal('modalDelete'); showToast('Dokumen berhasil dihapus.', 'success');
         await loadAllData(); renderDocuments(); renderDashboard();
@@ -349,10 +351,10 @@ async function handleAddUser() {
     if (!email || !email.includes('@')) { showToast('Email tidak valid.', 'error'); return; }
     if (!password) { showToast('Kata sandi wajib diisi.', 'error'); return; }
 
-    const { data: dupe } = await supabase.from('users').select('id').eq('email', email);
+    const { data: dupe } = await sb.from('users').select('id').eq('email', email);
     if (dupe && dupe.length > 0) { showToast('Email sudah terdaftar.', 'error'); return; }
 
-    const { error } = await supabase.from('users').insert({ nama, email, password, role, status });
+    const { error } = await sb.from('users').insert({ nama, email, password, role, status });
     if (error) { showToast(error.message, 'error'); return; }
     closeModal('modalAddUser'); showToast('Pengurus "' + nama + '" berhasil ditambahkan.');
     await loadAllData(); renderUsers(); renderDashboard();
@@ -370,10 +372,10 @@ async function handleEditUser() {
     if (!nama) { showToast('Nama wajib diisi.', 'error'); return; }
     if (!email || !email.includes('@')) { showToast('Email tidak valid.', 'error'); return; }
 
-    const { data: dupe } = await supabase.from('users').select('id').eq('email', email).neq('id', id);
+    const { data: dupe } = await sb.from('users').select('id').eq('email', email).neq('id', id);
     if (dupe && dupe.length > 0) { showToast('Email sudah digunakan.', 'error'); return; }
 
-    const { error } = await supabase.from('users').update({
+    const { error } = await sb.from('users').update({
         nama, email,
         role: document.getElementById('editUserRole').value,
         status: document.getElementById('editUserStatus').value
@@ -387,7 +389,7 @@ function confirmDeleteUser(id) {
     if ((u.role || '').toLowerCase() === 'admin') { showToast('Akun Admin tidak dapat dihapus.', 'error'); return; }
     document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus pengguna "' + u.nama + '"?';
     deleteCallback = async function() {
-        const { error } = await supabase.from('users').delete().eq('id', id);
+        const { error } = await sb.from('users').delete().eq('id', id);
         if (error) { showToast(error.message, 'error'); return; }
         closeModal('modalDelete'); showToast('Pengguna "' + u.nama + '" berhasil dihapus.', 'success');
         await loadAllData(); renderUsers(); renderDashboard();
