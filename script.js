@@ -13,6 +13,9 @@ let users = [];
 let docPage = 1;
 const docPerPage = 8;
 let globalSearchQuery = '';
+const MAX_UPLOAD_SIZE = 4 * 1024 * 1024;
+const MAX_UPLOAD_LABEL = '4MB';
+const STORAGE_BUCKET = 'documents';
 
 // ==================== UTILITAS ====================
 function formatDate(s) {
@@ -41,6 +44,47 @@ function getAvatarColor(n) { const c = ['#1B4332','#2D6A4F','#40916C','#065F46',
 function getUploaderName(id) { if (!id) return 'Sistem'; const u = users.find(x => x.id === id); return u ? u.nama : '-'; }
 function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
+function sanitizeFileName(name) {
+    return (name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+function getUploadErrorMessage(error) {
+    const msg = (error && error.message) ? error.message : 'Upload gagal.';
+    if (msg.toLowerCase().includes('bucket')) {
+        return 'Bucket Supabase Storage "documents" belum siap. Jalankan supabase-storage-setup.sql di Supabase SQL Editor.';
+    }
+    if (msg.includes("Failed to execute 'json'") || msg.includes('Unexpected end of JSON input')) {
+        return 'Respons storage kosong. Pastikan bucket "documents" sudah dibuat dan policy upload sudah aktif lewat supabase-storage-setup.sql.';
+    }
+    return msg;
+}
+async function uploadFileToStorage(file) {
+    const path = Date.now() + '-' + sanitizeFileName(file.name);
+    const url = SUPABASE_URL + '/storage/v1/object/' + STORAGE_BUCKET + '/' + encodeURIComponent(path);
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: 'Bearer ' + SUPABASE_ANON_KEY,
+            'Content-Type': file.type || 'application/octet-stream',
+            'Cache-Control': '3600',
+            'x-upsert': 'false'
+        },
+        body: file
+    });
+    const text = await response.text();
+    if (!response.ok) {
+        let message = text || ('HTTP ' + response.status);
+        try {
+            const parsed = JSON.parse(text);
+            message = parsed.message || parsed.error || message;
+        } catch (e) {}
+        throw new Error(message);
+    }
+    return {
+        path,
+        publicUrl: SUPABASE_URL + '/storage/v1/object/public/' + STORAGE_BUCKET + '/' + encodeURIComponent(path)
+    };
+}
 
 function showToast(msg, type = 'success') {
     const c = document.getElementById('toastContainer');
@@ -201,7 +245,7 @@ function openUploadModal() {
     document.getElementById('uploadTanggal').value = todayStr();
     document.getElementById('uploadDeskripsi').value = '';
     const z = document.getElementById('uploadZone'); z.classList.remove('has-file');
-    document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-cloud-upload-alt text-3xl mb-3" style="color:var(--accent);"></i><p class="text-sm font-600 mb-1">Klik atau seret file ke sini</p><p class="text-xs" style="color:var(--text-muted);">PDF, DOCX, XLSX, PPTX, JPG, PNG (Maks. 25MB)</p>';
+    document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-cloud-upload-alt text-3xl mb-3" style="color:var(--accent);"></i><p class="text-sm font-600 mb-1">Klik atau seret file ke sini</p><p class="text-xs" style="color:var(--text-muted);">PDF, DOCX, XLSX, PPTX, JPG, PNG (Maks. ' + MAX_UPLOAD_LABEL + ')</p>';
     openModal('modalUpload');
 }
 function handleDragOver(e) { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag-over'); }
@@ -213,7 +257,7 @@ function processFile(file) {
     const allowed = ['.pdf','.docx','.doc','.xlsx','.xls','.pptx','.ppt','.jpg','.jpeg','.png'];
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     if (!allowed.includes(ext)) { showToast('Tipe file tidak diizinkan.', 'error'); return; }
-    if (file.size > 25 * 1024 * 1024) { showToast('Ukuran file melebihi 25MB.', 'error'); return; }
+    if (file.size > MAX_UPLOAD_SIZE) { showToast('Ukuran file melebihi ' + MAX_UPLOAD_LABEL + '.', 'error'); return; }
     selectedFile = file;
     document.getElementById('uploadZone').classList.add('has-file');
     document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-file-check text-3xl mb-3" style="color:var(--primary-light);"></i><p class="text-sm font-600 mb-1">' + escapeHtml(file.name) + '</p><p class="text-xs" style="color:var(--text-muted);">' + formatFileSize(file.size) + ' &mdash; Klik untuk ganti</p>';
@@ -221,46 +265,40 @@ function processFile(file) {
 }
 
 async function handleUpload() {
-    const judul = document.getElementById('uploadJudul').value.trim();
-    const kategori = document.getElementById('uploadKategori').value.trim();
-    const tanggal = document.getElementById('uploadTanggal').value;
-    const deskripsi = document.getElementById('uploadDeskripsi').value.trim();
-    if (!judul) { showToast('Judul dokumen wajib diisi.', 'error'); return; }
-    if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
-    if (!tanggal) { showToast('Tanggal dokumen wajib diisi.', 'error'); return; }
+    try {
+        const judul = document.getElementById('uploadJudul').value.trim();
+        const kategori = document.getElementById('uploadKategori').value.trim();
+        const tanggal = document.getElementById('uploadTanggal').value;
+        const deskripsi = document.getElementById('uploadDeskripsi').value.trim();
+        if (!judul) { showToast('Judul dokumen wajib diisi.', 'error'); return; }
+        if (!kategori) { showToast('Kategori wajib diisi.', 'error'); return; }
+        if (!tanggal) { showToast('Tanggal dokumen wajib diisi.', 'error'); return; }
 
-    let file_url = null, file_name = null, file_type = null, file_size = null, file_id = null, download_url = null;
+        let file_url = null, file_name = null, file_type = null, file_size = null;
 
-    if (selectedFile) {
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        try {
-            const r = await fetch('/api/upload-drive', { method: 'POST', body: formData });
-            const result = await r.json();
-            if (!r.ok) { showToast('Gagal upload file: ' + result.error, 'error'); return; }
-            file_url = result.file_url;
-            file_id = result.file_id;
-            download_url = result.download_url;
+        if (selectedFile) {
+            const uploaded = await uploadFileToStorage(selectedFile);
+            file_url = uploaded.publicUrl;
             file_name = selectedFile.name;
             file_type = selectedFile.type;
             file_size = selectedFile.size;
-        } catch (e) {
-            showToast('Gagal upload file: ' + e.message, 'error'); return;
         }
+
+        const { error } = await sb.from('documents').insert({
+            judul, deskripsi, kategori, tanggal,
+            uploaded_by: currentUser ? currentUser.id : null,
+            file_name, file_url, file_type, file_size
+        });
+        if (error) { showToast(error.message, 'error'); return; }
+
+        closeModal('modalUpload');
+        showToast('Dokumen "' + judul + '" berhasil diunggah.');
+        await loadAllData();
+        if (!document.getElementById('page-dokumen').classList.contains('hidden')) renderDocuments();
+        renderDashboard();
+    } catch (e) {
+        showToast('Gagal upload file: ' + getUploadErrorMessage(e), 'error');
     }
-
-    const { error } = await sb.from('documents').insert({
-        judul, deskripsi, kategori, tanggal,
-        uploaded_by: currentUser ? currentUser.id : null,
-        file_name, file_url, file_type, file_size, file_id, download_url
-    });
-    if (error) { showToast(error.message, 'error'); return; }
-
-    closeModal('modalUpload');
-    showToast('Dokumen "' + judul + '" berhasil diunggah.');
-    await loadAllData();
-    if (!document.getElementById('page-dokumen').classList.contains('hidden')) renderDocuments();
-    renderDashboard();
 }
 
 function openEditDocModal(id) {
@@ -306,9 +344,11 @@ function previewDocument(id) {
     if (!d || !d.file_url) { showToast('File tidak tersedia.', 'error'); return; }
     document.getElementById('previewTitle').textContent = d.judul;
     const c = document.getElementById('previewContent');
-    if ((d.file_type || '').includes('image') && d.download_url) {
-        c.innerHTML = '<img src="' + d.download_url + '" style="display:block;margin:0 auto;max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;">';
-    } else if (d.file_id) {
+    if ((d.file_type || '').includes('image') && (d.download_url || d.file_url)) {
+        c.innerHTML = '<img src="' + (d.download_url || d.file_url) + '" style="display:block;margin:0 auto;max-width:100%;max-height:70vh;object-fit:contain;border-radius:8px;">';
+    } else if ((d.file_type || '').includes('pdf') && (d.download_url || d.file_url)) {
+        c.innerHTML = '<iframe src="' + (d.download_url || d.file_url) + '" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>';
+    } else if (d.file_id && d.file_url && d.file_url.includes('drive.google.com')) {
         c.innerHTML = '<iframe src="https://drive.google.com/file/d/' + d.file_id + '/preview" style="width:100%;height:70vh;border:none;border-radius:8px;"></iframe>';
     } else {
         c.innerHTML = '<div class="text-center py-8"><i class="fas fa-file-alt text-4xl mb-4" style="color:var(--text-muted);opacity:0.3;"></i><p class="text-sm mb-4" style="color:var(--text-muted);">Preview tidak tersedia untuk tipe file ini.</p><button onclick="downloadDocument(' + id + ')" class="btn btn-primary"><i class="fas fa-download"></i> Unduh File</button></div>';

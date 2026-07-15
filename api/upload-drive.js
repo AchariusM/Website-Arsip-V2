@@ -19,15 +19,24 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const form = formidable({ maxFileSize: 25 * 1024 * 1024 }); // 25MB
+    const form = formidable({ maxFileSize: 4 * 1024 * 1024 }); // 4MB, aman untuk Vercel Serverless
     const [, files] = await form.parse(req);
     const uploaded = files.file?.[0];
     if (!uploaded) return res.status(400).json({ error: 'File tidak ditemukan' });
 
+    const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const serviceAccountPrivateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+    const driveFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    if (!serviceAccountEmail || !serviceAccountPrivateKey || !driveFolderId) {
+      return res.status(500).json({
+        error: 'Konfigurasi Google Drive belum lengkap. Pastikan GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, dan GOOGLE_DRIVE_FOLDER_ID sudah diisi.'
+      });
+    }
+
     const auth = new google.auth.GoogleAuth({
       credentials: {
-        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        private_key: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        client_email: serviceAccountEmail,
+        private_key: serviceAccountPrivateKey.replace(/\\n/g, '\n'),
       },
       scopes: ['https://www.googleapis.com/auth/drive'],
     });
@@ -36,7 +45,7 @@ export default async function handler(req, res) {
     const created = await drive.files.create({
       requestBody: {
         name: uploaded.originalFilename,
-        parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
+        parents: [driveFolderId],
       },
       media: {
         mimeType: uploaded.mimetype,

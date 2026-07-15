@@ -3,8 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.4.0",
   "dependencies": {
     "@supabase/supabase-js": "^2.110.3",
+    "formidable": "^3.5.4",
+    "googleapis": "^144.0.0",
     "mysql2": "^3.10.0"
   }
 }
