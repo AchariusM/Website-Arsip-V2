@@ -49,11 +49,14 @@ function sanitizeFileName(name) {
 }
 function getUploadErrorMessage(error) {
     const msg = (error && error.message) ? error.message : 'Upload gagal.';
+    if (msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('rls')) {
+        return 'Policy database belum aktif. Jalankan fix-rls-policies.sql di Supabase SQL Editor.';
+    }
     if (msg.toLowerCase().includes('bucket')) {
-        return 'Bucket Supabase Storage "documents" belum siap. Jalankan supabase-storage-setup.sql di Supabase SQL Editor.';
+        return 'Bucket Supabase Storage "documents" belum siap. Jalankan supabase-setup.sql di Supabase SQL Editor.';
     }
     if (msg.includes("Failed to execute 'json'") || msg.includes('Unexpected end of JSON input')) {
-        return 'Respons storage kosong. Pastikan bucket "documents" sudah dibuat dan policy upload sudah aktif lewat supabase-storage-setup.sql.';
+        return 'Respons storage kosong. Jalankan supabase-setup.sql di Supabase SQL Editor untuk membuat bucket dan policy upload.';
     }
     return msg;
 }
@@ -107,24 +110,38 @@ function animateNumber(el, target) {
 
 // ==================== AUTH ====================
 async function handleLogin() {
-    const email = document.getElementById('loginEmail').value.trim();
-    const password = document.getElementById('loginPassword').value;
+    const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+    const password = document.getElementById('loginPassword').value.trim();
     const err = document.getElementById('loginError');
     if (!email || !password) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Email dan kata sandi harus diisi.'; return; }
 
     const { data, error } = await sb
         .from('users')
-        .select('id, nama, email, role, status')
-        .eq('email', email)
-        .eq('password', password)
+        .select('id, nama, email, password, role, status')
+        .ilike('email', email)
         .limit(1);
 
     if (error) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Gagal terhubung ke database: ' + error.message; return; }
-    if (!data || data.length === 0) { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Email atau kata sandi salah.'; return; }
+    if (!data || data.length === 0) {
+        err.classList.remove('hidden');
+        err.querySelector('span').textContent = 'Akun tidak ditemukan. Jalankan supabase-setup.sql di Supabase SQL Editor.';
+        return;
+    }
+    if ((data[0].password || '').trim() !== password) {
+        err.classList.remove('hidden');
+        err.querySelector('span').textContent = 'Kata sandi salah. Untuk akun demo gunakan admin123 atau pengurus123.';
+        return;
+    }
     if (data[0].status === 'Nonaktif') { err.classList.remove('hidden'); err.querySelector('span').textContent = 'Akun nonaktif.'; return; }
 
     err.classList.add('hidden');
-    currentUser = data[0];
+    currentUser = {
+        id: data[0].id,
+        nama: data[0].nama,
+        email: data[0].email,
+        role: data[0].role,
+        status: data[0].status
+    };
     document.getElementById('headerAvatar').textContent = getInitials(currentUser.nama);
     document.getElementById('headerName').textContent = currentUser.nama;
     document.getElementById('dropdownName').textContent = currentUser.nama;
