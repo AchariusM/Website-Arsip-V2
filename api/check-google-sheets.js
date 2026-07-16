@@ -1,45 +1,35 @@
-function normalizePrivateKey(key) {
-  return String(key || '')
-    .trim()
-    .replace(/^"|"$/g, '')
-    .replace(/\\n/g, '\n');
-}
+import {
+  assertGoogleSheetsEnv,
+  getGoogleAccessToken,
+  getGoogleSheetsEnv,
+  getSpreadsheetMeta
+} from './_google-sheets.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { google } = await import('googleapis');
-    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
-    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-
-    if (!clientEmail || !privateKey || !spreadsheetId) {
+    const googleEnv = getGoogleSheetsEnv();
+    try {
+      assertGoogleSheetsEnv(googleEnv);
+    } catch (err) {
       return res.status(500).json({
         ok: false,
-        error: 'Environment Google Sheets belum lengkap.',
-        hasClientEmail: Boolean(clientEmail),
-        hasPrivateKey: Boolean(privateKey),
-        hasSpreadsheetId: Boolean(spreadsheetId)
+        error: err.message,
+        hasClientEmail: Boolean(googleEnv.clientEmail),
+        hasPrivateKey: Boolean(googleEnv.privateKey),
+        hasSpreadsheetId: Boolean(googleEnv.spreadsheetId)
       });
     }
 
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: clientEmail,
-        private_key: normalizePrivateKey(privateKey)
-      },
-      scopes: ['https://www.googleapis.com/auth/spreadsheets']
-    });
-
-    const sheets = google.sheets({ version: 'v4', auth });
-    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const accessToken = await getGoogleAccessToken(googleEnv);
+    const meta = await getSpreadsheetMeta(googleEnv.spreadsheetId, accessToken);
 
     return res.status(200).json({
       ok: true,
-      title: meta.data.properties?.title || null,
-      sheetCount: meta.data.sheets?.length || 0,
-      serviceAccount: clientEmail
+      title: meta.properties?.title || null,
+      sheetCount: meta.sheets?.length || 0,
+      serviceAccount: googleEnv.clientEmail
     });
   } catch (err) {
     console.error(err);
