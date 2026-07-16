@@ -49,10 +49,12 @@ Di halaman `Data Penduduk`:
 
 Jika muncul `FUNCTION_INVOCATION_FAILED`:
 
-1. Pastikan project sudah di-redeploy setelah env dibuat.
-2. Pastikan spreadsheet sudah di-share ke `GOOGLE_SERVICE_ACCOUNT_EMAIL` sebagai `Editor`.
-3. Pastikan `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` berisi private key lengkap, termasuk:
+1. Buka `/api/ping`. Jika endpoint ini gagal, berarti Vercel Functions belum berjalan/deploy belum benar.
+2. Buka `/api/check-google-sheets`. Endpoint ini mengecek env dan akses spreadsheet.
+3. Pastikan project sudah di-redeploy setelah env dibuat.
+4. Pastikan spreadsheet sudah di-share ke `GOOGLE_SERVICE_ACCOUNT_EMAIL` sebagai `Editor`.
+5. Pastikan `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` berisi private key lengkap, termasuk:
    `-----BEGIN PRIVATE KEY-----` dan `-----END PRIVATE KEY-----`.
-4. Buka Vercel Dashboard -> Project -> Functions/Logs untuk melihat error detail dari `/api/sync-penduduk-sheets`.
+6. Buka Vercel Dashboard -> Project -> Functions/Logs untuk melihat error detail dari `/api/sync-penduduk-sheets`.
 
 Endpoint sync mengambil data penduduk langsung dari Supabase, jadi browser tidak mengirim seluruh data besar ke function.

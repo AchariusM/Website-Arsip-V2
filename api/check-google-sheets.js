@@ -1,5 +1,3 @@
-import { google } from 'googleapis';
-
 function normalizePrivateKey(key) {
   return String(key || '')
     .trim()
@@ -11,6 +9,7 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const { google } = await import('googleapis');
     const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
     const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
     const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
