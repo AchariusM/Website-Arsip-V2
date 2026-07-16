@@ -1,5 +1,4 @@
 import { google } from 'googleapis';
-import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://yjmlbytfsxgsjhvmoyvh.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqbWxieXRmc3hnc2podm1veXZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTMwMzAsImV4cCI6MjA5OTUyOTAzMH0.uxJMqH5_7Xga5_iFed0v-NnLr3Q4FrM7eo0hs56YFpQ';
@@ -79,20 +78,43 @@ function applySearch(rows, search) {
 }
 
 async function fetchPendudukRows({ mode, rt, search }) {
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const { data, error } = await supabase
-    .from('penduduk')
-    .select(KEYS.join(','))
-    .order('rt', { ascending: true })
-    .order('nama', { ascending: true });
+  const params = new URLSearchParams();
+  params.set('select', KEYS.join(','));
+  params.set('order', 'rt.asc,nama.asc');
 
-  if (error) throw new Error(error.message);
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/penduduk?${params.toString()}`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+    }
+  });
 
-  let rows = data || [];
+  const text = await response.text();
+  let data = [];
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      throw new Error(text);
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.message || data?.error || `Gagal mengambil data penduduk dari Supabase (HTTP ${response.status})`);
+  }
+
+  let rows = Array.isArray(data) ? data : [];
   if (mode !== 'all' && rt !== 'Semua') {
     rows = rows.filter(row => normalizeRt(row.rt) === normalizeRt(rt));
   }
   return applySearch(rows, search);
+}
+
+function normalizePrivateKey(key) {
+  return String(key || '')
+    .trim()
+    .replace(/^"|"$/g, '')
+    .replace(/\\n/g, '\n');
 }
 
 async function ensureSheets(sheets, spreadsheetId, titles) {
@@ -149,7 +171,7 @@ export default async function handler(req, res) {
     const auth = new google.auth.GoogleAuth({
       credentials: {
         client_email: clientEmail,
-        private_key: privateKey.replace(/\\n/g, '\n')
+        private_key: normalizePrivateKey(privateKey)
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets']
     });
