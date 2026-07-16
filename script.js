@@ -626,7 +626,7 @@ async function syncPendudukFilterToSheets() {
     if (rows.length === 0) { showToast('Tidak ada data untuk disinkronkan.', 'error'); return; }
     try {
         const rt = pendudukRtFilter === 'Semua' ? 'Semua' : pendudukRtFilter;
-        await postJsonResponse('/api/sync-penduduk-sheets', { mode: 'filter', rt, rows });
+        await postJsonResponse('/api/sync-penduduk-sheets', { mode: 'filter', rt, search: pendudukSearchQuery });
         showToast(rows.length + ' data berhasil disinkronkan ke Google Sheets.');
     } catch (err) {
         showToast('Gagal sync Google Sheets: ' + (err.message || err), 'error');
@@ -635,7 +635,7 @@ async function syncPendudukFilterToSheets() {
 async function syncPendudukAllToSheets() {
     if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk disinkronkan.', 'error'); return; }
     try {
-        await postJsonResponse('/api/sync-penduduk-sheets', { mode: 'all', rows: penduduk });
+        await postJsonResponse('/api/sync-penduduk-sheets', { mode: 'all' });
         showToast('Semua data penduduk berhasil disinkronkan per RT.');
     } catch (err) {
         showToast('Gagal sync Google Sheets: ' + (err.message || err), 'error');

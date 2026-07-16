@@ -44,3 +44,15 @@ Di halaman `Data Penduduk`:
 
 - `Sync Filter`: mengirim data yang sedang tampil/filter RT aktif ke satu sheet.
 - `Sync Semua RT`: mengirim semua data ke sheet `Semua RT`, `RT 1`, `RT 2`, `RT 3`, `RT 4`, `RT 5`, dan `RT 6`.
+
+## Troubleshooting
+
+Jika muncul `FUNCTION_INVOCATION_FAILED`:
+
+1. Pastikan project sudah di-redeploy setelah env dibuat.
+2. Pastikan spreadsheet sudah di-share ke `GOOGLE_SERVICE_ACCOUNT_EMAIL` sebagai `Editor`.
+3. Pastikan `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` berisi private key lengkap, termasuk:
+   `-----BEGIN PRIVATE KEY-----` dan `-----END PRIVATE KEY-----`.
+4. Buka Vercel Dashboard -> Project -> Functions/Logs untuk melihat error detail dari `/api/sync-penduduk-sheets`.
+
+Endpoint sync mengambil data penduduk langsung dari Supabase, jadi browser tidak mengirim seluruh data besar ke function.
