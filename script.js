@@ -10,12 +10,38 @@ let deleteCallback = null;
 let selectedFile = null;
 let documents = [];
 let users = [];
+let penduduk = [];
 let docPage = 1;
 const docPerPage = 8;
 let globalSearchQuery = '';
+let pendudukRtFilter = 'Semua';
+let pendudukSearchQuery = '';
 const MAX_UPLOAD_SIZE = 4 * 1024 * 1024;
 const MAX_UPLOAD_LABEL = '4MB';
 const STORAGE_BUCKET = 'documents';
+const RT_OPTIONS = ['Semua', '1', '2', '3', '4', '5', '6'];
+const PENDUDUK_COLUMNS = [
+    { header: 'No', key: 'nomor', type: 'number' },
+    { header: 'NIK', key: 'nik' },
+    { header: 'Nomor KK', key: 'nomor_kk' },
+    { header: 'Nomor RTS', key: 'nomor_rts' },
+    { header: 'Nama', key: 'nama' },
+    { header: 'Padukuhan', key: 'padukuhan' },
+    { header: 'RW', key: 'rw' },
+    { header: 'RT', key: 'rt' },
+    { header: 'Pendidikan (dLm KK)', key: 'pendidikan_dlm_kk' },
+    { header: 'Pendidikan (sdg ditemph)', key: 'pendidikan_sdg_ditemph' },
+    { header: 'Pekerjaan', key: 'pekerjaan' },
+    { header: 'Tanggal Lahir', key: 'tanggal_lahir', type: 'date' },
+    { header: 'Tempat Lahir', key: 'tempat_lahir' },
+    { header: 'Umur', key: 'umur', type: 'number' },
+    { header: 'Kawin', key: 'kawin' },
+    { header: 'SHDK', key: 'shdk' },
+    { header: 'Gol. Darah', key: 'gol_darah' },
+    { header: 'Nama Ayah', key: 'nama_ayah' },
+    { header: 'Nama Ibu', key: 'nama_ibu' },
+    { header: 'Status', key: 'status' }
+];
 
 // ==================== UTILITAS ====================
 function formatDate(s) {
@@ -44,6 +70,54 @@ function getAvatarColor(n) { const c = ['#1B4332','#2D6A4F','#40916C','#065F46',
 function getUploaderName(id) { if (!id) return 'Sistem'; const u = users.find(x => x.id === id); return u ? u.nama : '-'; }
 function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
+function normalizeHeader(s) {
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[().]/g, '');
+}
+function normalizeRt(rt) {
+    const m = String(rt || '').match(/\d+/);
+    return m ? String(parseInt(m[0], 10)) : '';
+}
+function normalizeNumber(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
+    return Number.isFinite(n) ? n : null;
+}
+function validDateParts(year, month, day) {
+    if (!year || !month || !day) return null;
+    if (year < 1900 || year > new Date().getFullYear()) return null;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+    return year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+}
+function normalizeDateValue(v) {
+    if (!v) return null;
+    if (typeof v === 'number') {
+        const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+        return isNaN(d) ? null : validDateParts(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    }
+    if (v instanceof Date && !isNaN(v)) return v.toISOString().split('T')[0];
+    const s = String(v).trim();
+    if (!s) return null;
+    const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) {
+        const year = parseInt(iso[1], 10);
+        const a = parseInt(iso[2], 10);
+        const b = parseInt(iso[3], 10);
+        return validDateParts(year, a, b) || (a > 12 ? validDateParts(year, b, a) : null);
+    }
+    const local = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+    if (local) {
+        const y = local[3].length === 2 ? '20' + local[3] : local[3];
+        return validDateParts(parseInt(y, 10), parseInt(local[2], 10), parseInt(local[1], 10));
+    }
+    return null;
+}
+function chunkArray(arr, size) {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+    return chunks;
+}
 function sanitizeFileName(name) {
     return (name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
 }
@@ -57,6 +131,19 @@ function getUploadErrorMessage(error) {
     }
     if (msg.includes("Failed to execute 'json'") || msg.includes('Unexpected end of JSON input')) {
         return 'Respons storage kosong. Jalankan supabase-setup.sql di Supabase SQL Editor untuk membuat bucket dan policy upload.';
+    }
+    return msg;
+}
+function getPendudukErrorMessage(error) {
+    const msg = (error && error.message) ? error.message : String(error || 'Terjadi kesalahan.');
+    if (msg.includes("Could not find the table 'public.penduduk'") || msg.toLowerCase().includes('schema cache')) {
+        return 'Tabel penduduk belum masuk schema cache. Jalankan fix-penduduk-schema-cache.sql di Supabase SQL Editor, tunggu 10-30 detik, lalu refresh halaman.';
+    }
+    if (msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('rls')) {
+        return 'Policy penduduk belum aktif. Jalankan fix-rls-policies.sql di Supabase SQL Editor.';
+    }
+    if (msg.toLowerCase().includes('date/time field value out of range')) {
+        return 'Ada nilai Tanggal Lahir yang tidak valid di file Excel. Importer sudah diperbarui untuk mengosongkan tanggal invalid; refresh halaman lalu import ulang.';
     }
     return msg;
 }
@@ -87,6 +174,21 @@ async function uploadFileToStorage(file) {
         path,
         publicUrl: SUPABASE_URL + '/storage/v1/object/public/' + STORAGE_BUCKET + '/' + encodeURIComponent(path)
     };
+}
+async function postJsonResponse(url, payload) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+    let data = {};
+    if (text) {
+        try { data = JSON.parse(text); }
+        catch (e) { data = { error: text }; }
+    }
+    if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+    return data;
 }
 
 function showToast(msg, type = 'success') {
@@ -167,12 +269,14 @@ document.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !doc
 
 // ==================== MUAT DATA ====================
 async function loadAllData() {
-    const [docsRes, usersRes] = await Promise.all([
+    const [docsRes, usersRes, pendudukRes] = await Promise.all([
         sb.from('documents').select('*').order('created_at', { ascending: false }),
-        sb.from('users').select('*').order('id', { ascending: true })
+        sb.from('users').select('*').order('id', { ascending: true }),
+        sb.from('penduduk').select('*').order('rt', { ascending: true }).order('nama', { ascending: true })
     ]);
     if (docsRes.error) showToast(docsRes.error.message, 'error'); else documents = docsRes.data;
     if (usersRes.error) showToast(usersRes.error.message, 'error'); else users = usersRes.data;
+    if (pendudukRes.error) penduduk = []; else penduduk = pendudukRes.data || [];
 }
 
 // ==================== NAVIGASI ====================
@@ -183,6 +287,7 @@ function showPage(page) {
     document.querySelectorAll('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.page === page));
     if (page === 'dashboard') renderDashboard();
     else if (page === 'dokumen') { docPage = 1; renderDocuments(); }
+    else if (page === 'penduduk') renderPenduduk();
     else if (page === 'pengguna') renderUsers();
 }
 
@@ -378,6 +483,209 @@ function downloadDocument(id) {
     const link = d.download_url || d.file_url;
     window.open(link, '_blank');
     showToast('Membuka "' + (d.file_name || 'file') + '"...', 'info');
+}
+
+// ==================== DATA PENDUDUK ====================
+function getFilteredPenduduk() {
+    const q = pendudukSearchQuery.toLowerCase().trim();
+    return penduduk.filter(p => {
+        const rtMatch = pendudukRtFilter === 'Semua' || normalizeRt(p.rt) === pendudukRtFilter;
+        const searchMatch = !q || (p.nama || '').toLowerCase().includes(q) || (p.nik || '').toLowerCase().includes(q);
+        return rtMatch && searchMatch;
+    });
+}
+function renderPenduduk() {
+    renderPendudukStats();
+    renderPendudukTabs();
+    renderPendudukTable();
+}
+function renderPendudukStats() {
+    const c = document.getElementById('pendudukStats');
+    if (!c) return;
+    const counts = {};
+    RT_OPTIONS.slice(1).forEach(rt => counts[rt] = 0);
+    penduduk.forEach(p => {
+        const rt = normalizeRt(p.rt);
+        if (counts[rt] !== undefined) counts[rt]++;
+    });
+    let h = '<button class="mini-stat mini-stat-btn ' + (pendudukRtFilter === 'Semua' ? 'active' : '') + '" onclick="setPendudukRtFilter(\'Semua\')"><span>Total</span><strong>' + penduduk.length + '</strong></button>';
+    RT_OPTIONS.slice(1).forEach(rt => {
+        h += '<button class="mini-stat mini-stat-btn ' + (pendudukRtFilter === rt ? 'active' : '') + '" onclick="setPendudukRtFilter(\'' + rt + '\')"><span>RT ' + rt + '</span><strong>' + counts[rt] + '</strong></button>';
+    });
+    c.innerHTML = h;
+}
+function renderPendudukTabs() {
+    const c = document.getElementById('pendudukRtTabs');
+    if (!c) return;
+    c.innerHTML = RT_OPTIONS.map(rt => '<button class="rt-tab ' + (pendudukRtFilter === rt ? 'active' : '') + '" onclick="setPendudukRtFilter(\'' + rt + '\')">' + (rt === 'Semua' ? 'Semua RT' : 'RT ' + rt) + '</button>').join('');
+}
+function renderPendudukTable() {
+    const c = document.getElementById('pendudukTableContainer');
+    if (!c) return;
+    const rows = getFilteredPenduduk();
+    let h = '<table class="data-table penduduk-table"><thead><tr><th>NIK</th><th>Nama</th><th>RT/RW</th><th>Padukuhan</th><th>TTL</th><th>Umur</th><th>Pekerjaan</th><th>Status</th></tr></thead><tbody>';
+    if (rows.length === 0) {
+        h += '<tr><td colspan="8" class="text-center py-12"><div class="empty-state"><i class="fas fa-address-book block"></i><p class="text-sm">Belum ada data penduduk</p></div></td></tr>';
+    } else {
+        rows.forEach(p => {
+            h += '<tr>';
+            h += '<td class="text-sm font-600">' + escapeHtml(p.nik || '-') + '</td>';
+            h += '<td><div class="font-600 text-sm">' + escapeHtml(p.nama || '-') + '</div><div class="text-xs" style="color:var(--text-muted);">KK: ' + escapeHtml(p.nomor_kk || '-') + '</div></td>';
+            h += '<td><span class="badge badge-kategori">RT ' + escapeHtml(normalizeRt(p.rt) || '-') + '</span><span class="text-xs ml-2" style="color:var(--text-muted);">RW ' + escapeHtml(p.rw || '-') + '</span></td>';
+            h += '<td class="text-sm">' + escapeHtml(p.padukuhan || '-') + '</td>';
+            h += '<td class="text-sm">' + escapeHtml(p.tempat_lahir || '-') + '<br><span style="color:var(--text-muted);">' + formatDate(p.tanggal_lahir) + '</span></td>';
+            h += '<td class="text-sm">' + escapeHtml(p.umur || '-') + '</td>';
+            h += '<td class="text-sm">' + escapeHtml(p.pekerjaan || '-') + '</td>';
+            h += '<td class="text-sm">' + escapeHtml(p.status || '-') + '</td>';
+            h += '</tr>';
+        });
+    }
+    h += '</tbody></table>';
+    c.innerHTML = h;
+}
+function setPendudukRtFilter(rt) {
+    pendudukRtFilter = rt;
+    renderPenduduk();
+}
+function handlePendudukSearch(q) {
+    pendudukSearchQuery = q || '';
+    renderPendudukTable();
+}
+function findHeaderRow(rows) {
+    let best = 0, bestScore = -1;
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+        const normalized = rows[i].map(normalizeHeader);
+        const score = ['nik', 'nama', 'rt'].reduce((n, key) => n + (normalized.includes(key) ? 1 : 0), 0);
+        if (score > bestScore) { best = i; bestScore = score; }
+    }
+    return best;
+}
+function rowsFromSheet(sheet) {
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+    const headerIndex = findHeaderRow(matrix);
+    const headers = (matrix[headerIndex] || []).map(v => String(v || '').trim());
+    return matrix.slice(headerIndex + 1).map(row => {
+        const obj = {};
+        headers.forEach((h, i) => { if (h) obj[h] = row[i]; });
+        return obj;
+    });
+}
+function buildPendudukPayload(raw) {
+    const byHeader = {};
+    Object.keys(raw || {}).forEach(k => byHeader[normalizeHeader(k)] = raw[k]);
+    const payload = {};
+    PENDUDUK_COLUMNS.forEach(col => {
+        const value = byHeader[normalizeHeader(col.header)] ?? raw[col.key] ?? '';
+        if (col.key === 'rt') payload[col.key] = normalizeRt(value);
+        else if (col.type === 'number') payload[col.key] = normalizeNumber(value);
+        else if (col.type === 'date') payload[col.key] = normalizeDateValue(value);
+        else payload[col.key] = String(value || '').trim();
+    });
+    return payload;
+}
+function pendudukToExportRows(rows) {
+    return rows.map(p => {
+        const row = {};
+        PENDUDUK_COLUMNS.forEach(col => {
+            row[col.header] = p[col.key] ?? '';
+        });
+        return row;
+    });
+}
+function safeSheetName(name) {
+    return String(name || 'Sheet').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
+}
+function downloadPendudukWorkbook(sheets, fileName) {
+    if (!window.XLSX) { showToast('Library export Excel belum termuat. Refresh halaman lalu coba lagi.', 'error'); return; }
+    const workbook = XLSX.utils.book_new();
+    sheets.forEach(sheet => {
+        const rows = pendudukToExportRows(sheet.rows);
+        const worksheet = XLSX.utils.json_to_sheet(rows, { header: PENDUDUK_COLUMNS.map(c => c.header) });
+        XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheet.name));
+    });
+    XLSX.writeFile(workbook, fileName);
+}
+function exportPendudukAktif() {
+    const rows = getFilteredPenduduk();
+    if (rows.length === 0) { showToast('Tidak ada data untuk diexport.', 'error'); return; }
+    const label = pendudukRtFilter === 'Semua' ? 'semua-rt' : 'rt-' + pendudukRtFilter;
+    downloadPendudukWorkbook([{ name: pendudukRtFilter === 'Semua' ? 'Semua RT' : 'RT ' + pendudukRtFilter, rows }], 'data-penduduk-' + label + '.xlsx');
+    showToast(rows.length + ' data penduduk diexport.');
+}
+function exportPendudukPerRt() {
+    if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk diexport.', 'error'); return; }
+    const sheets = [{ name: 'Semua RT', rows: penduduk }];
+    RT_OPTIONS.slice(1).forEach(rt => {
+        sheets.push({ name: 'RT ' + rt, rows: penduduk.filter(p => normalizeRt(p.rt) === rt) });
+    });
+    downloadPendudukWorkbook(sheets, 'data-penduduk-per-rt.xlsx');
+    showToast('Data penduduk semua RT diexport.');
+}
+async function syncPendudukFilterToSheets() {
+    const rows = getFilteredPenduduk();
+    if (rows.length === 0) { showToast('Tidak ada data untuk disinkronkan.', 'error'); return; }
+    try {
+        const rt = pendudukRtFilter === 'Semua' ? 'Semua' : pendudukRtFilter;
+        await postJsonResponse('/api/sync-penduduk-sheets', { mode: 'filter', rt, rows });
+        showToast(rows.length + ' data berhasil disinkronkan ke Google Sheets.');
+    } catch (err) {
+        showToast('Gagal sync Google Sheets: ' + (err.message || err), 'error');
+    }
+}
+async function syncPendudukAllToSheets() {
+    if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk disinkronkan.', 'error'); return; }
+    try {
+        await postJsonResponse('/api/sync-penduduk-sheets', { mode: 'all', rows: penduduk });
+        showToast('Semua data penduduk berhasil disinkronkan per RT.');
+    } catch (err) {
+        showToast('Gagal sync Google Sheets: ' + (err.message || err), 'error');
+    }
+}
+async function handlePendudukImport(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+        if (!window.XLSX) throw new Error('Library pembaca Excel belum termuat. Refresh halaman lalu coba lagi.');
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rawRows = rowsFromSheet(sheet);
+        const rows = rawRows.map(buildPendudukPayload).filter(r => r.nama || r.nik);
+        if (rows.length === 0) { showToast('File tidak berisi data penduduk yang valid.', 'error'); return; }
+        for (const chunk of chunkArray(rows, 300)) {
+            const { error } = await sb.from('penduduk').insert(chunk);
+            if (error) throw error;
+        }
+        showToast(rows.length + ' data penduduk berhasil diimport dan dipisah otomatis per RT.');
+        e.target.value = '';
+        await loadAllData();
+        renderPenduduk();
+    } catch (err) {
+        showToast('Gagal import penduduk: ' + getPendudukErrorMessage(err), 'error');
+    }
+}
+function openAddPendudukModal() {
+    const c = document.getElementById('pendudukManualFields');
+    c.innerHTML = PENDUDUK_COLUMNS.map(col => {
+        const type = col.type === 'date' ? 'date' : (col.type === 'number' ? 'number' : 'text');
+        return '<div class="form-group"><label class="form-label">' + escapeHtml(col.header) + '</label><input id="penduduk_' + col.key + '" type="' + type + '" class="form-input"></div>';
+    }).join('');
+    openModal('modalAddPenduduk');
+}
+async function handleAddPenduduk() {
+    const raw = {};
+    PENDUDUK_COLUMNS.forEach(col => {
+        const el = document.getElementById('penduduk_' + col.key);
+        raw[col.key] = el ? el.value : '';
+    });
+    const payload = buildPendudukPayload(raw);
+    if (!payload.nama || !payload.nik) { showToast('Nama dan NIK wajib diisi.', 'error'); return; }
+    const { error } = await sb.from('penduduk').insert(payload);
+    if (error) { showToast(getPendudukErrorMessage(error), 'error'); return; }
+    closeModal('modalAddPenduduk');
+    showToast('Data penduduk berhasil disimpan.');
+    await loadAllData();
+    renderPenduduk();
 }
 
 // ==================== PENGGUNA ====================

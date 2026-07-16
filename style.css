@@ -207,10 +207,30 @@ select.form-input { cursor: pointer; }
 .section-card-header h3 { font-size: 0.95rem; font-weight: 700; margin: 0; }
 .empty-state { text-align: center; padding: 48px 20px; color: var(--text-muted); }
 .empty-state i { font-size: 3rem; margin-bottom: 16px; opacity: 0.3; }
+.mini-stat {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; min-height: 74px; display: flex; flex-direction: column;
+    justify-content: center; align-items: flex-start; gap: 4px;
+}
+.mini-stat span { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
+.mini-stat strong { font-size: 1.45rem; line-height: 1; color: var(--primary); }
+.mini-stat-btn { width: 100%; cursor: pointer; font-family: 'Plus Jakarta Sans', sans-serif; text-align: left; }
+.mini-stat-btn.active { border-color: var(--primary-light); background: #F0FDF4; }
+.penduduk-toolbar { gap: 12px; flex-wrap: wrap; }
+.penduduk-search { width: min(100%, 280px); }
+.rt-tab {
+    border: 1px solid var(--border); background: var(--card); color: var(--text-muted);
+    border-radius: 8px; padding: 8px 12px; font-size: 0.8rem; font-weight: 700;
+    cursor: pointer; transition: all 0.15s ease; font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.rt-tab:hover { border-color: var(--primary-light); color: var(--primary); }
+.rt-tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+.penduduk-table td { white-space: nowrap; }
 @media (max-width: 768px) {
     .stat-card .stat-number { font-size: 1.8rem; }
     .modal-box { margin: 8px; border-radius: 12px; }
     .hide-mobile { display: none !important; }
+    .penduduk-search { width: 100%; }
     .data-table { font-size: 0.8rem; }
     .data-table thead th, .data-table tbody td { padding: 10px 10px; }
 }
