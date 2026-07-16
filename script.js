@@ -42,6 +42,28 @@ const PENDUDUK_COLUMNS = [
     { header: 'Nama Ibu', key: 'nama_ibu' },
     { header: 'Status', key: 'status' }
 ];
+const PENDUDUK_HEADER_ALIASES = {
+    nomor: ['no', 'nomor'],
+    nik: ['nik'],
+    nomor_kk: ['nomor kk', 'no kk', 'nokk'],
+    nomor_rts: ['nomor rts', 'no rts', 'nomor rt sosial'],
+    nama: ['nama', 'nama lengkap'],
+    padukuhan: ['padukuhan', 'dukuh'],
+    rw: ['rw'],
+    rt: ['rt'],
+    pendidikan_dlm_kk: ['pendidikan dlm kk', 'pendidikan dalam kk'],
+    pendidikan_sdg_ditemph: ['pendidikan sdg ditemph', 'pendidikan sedang ditempuh', 'pendidikan sdg ditempuh'],
+    pekerjaan: ['pekerjaan'],
+    tanggal_lahir: ['tanggal lahir', 'tgl lahir'],
+    tempat_lahir: ['tempat lahir'],
+    umur: ['umur'],
+    kawin: ['kawin', 'status kawin'],
+    shdk: ['shdk'],
+    gol_darah: ['gol darah', 'golongan darah'],
+    nama_ayah: ['nama ayah', 'ayah'],
+    nama_ibu: ['nama ibu', 'ibu'],
+    status: ['status']
+};
 
 // ==================== UTILITAS ====================
 function formatDate(s) {
@@ -551,31 +573,63 @@ function handlePendudukSearch(q) {
     pendudukSearchQuery = q || '';
     renderPendudukTable();
 }
+function headerMatchesColumn(header, col) {
+    const normalized = normalizeHeader(header);
+    const aliases = PENDUDUK_HEADER_ALIASES[col.key] || [col.header];
+    return aliases.map(normalizeHeader).includes(normalized);
+}
 function findHeaderRow(rows) {
     let best = 0, bestScore = -1;
     for (let i = 0; i < Math.min(rows.length, 20); i++) {
-        const normalized = rows[i].map(normalizeHeader);
-        const score = ['nik', 'nama', 'rt'].reduce((n, key) => n + (normalized.includes(key) ? 1 : 0), 0);
+        const score = PENDUDUK_COLUMNS.reduce((n, col) => {
+            return n + ((rows[i] || []).some(cell => headerMatchesColumn(cell, col)) ? 1 : 0);
+        }, 0);
         if (score > bestScore) { best = i; bestScore = score; }
     }
     return best;
+}
+function buildPendudukHeaderMap(headers) {
+    const map = {};
+    PENDUDUK_COLUMNS.forEach(col => {
+        const index = headers.findIndex(header => headerMatchesColumn(header, col));
+        if (index >= 0) map[col.key] = index;
+    });
+    return map;
 }
 function rowsFromSheet(sheet) {
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
     const headerIndex = findHeaderRow(matrix);
     const headers = (matrix[headerIndex] || []).map(v => String(v || '').trim());
+    const headerMap = buildPendudukHeaderMap(headers);
     return matrix.slice(headerIndex + 1).map(row => {
         const obj = {};
         headers.forEach((h, i) => { if (h) obj[h] = row[i]; });
+        obj.__cells = row;
+        obj.__headerMap = headerMap;
         return obj;
     });
 }
-function buildPendudukPayload(raw) {
+function getPendudukRawValue(raw, col) {
+    if (raw && raw.__headerMap && raw.__headerMap[col.key] !== undefined) {
+        return raw.__cells ? raw.__cells[raw.__headerMap[col.key]] : '';
+    }
+
     const byHeader = {};
-    Object.keys(raw || {}).forEach(k => byHeader[normalizeHeader(k)] = raw[k]);
+    Object.keys(raw || {}).forEach(k => {
+        if (!k.startsWith('__')) byHeader[normalizeHeader(k)] = raw[k];
+    });
+
+    const aliases = PENDUDUK_HEADER_ALIASES[col.key] || [col.header];
+    for (const alias of aliases) {
+        const value = byHeader[normalizeHeader(alias)];
+        if (value !== undefined) return value;
+    }
+    return raw[col.key] ?? '';
+}
+function buildPendudukPayload(raw) {
     const payload = {};
     PENDUDUK_COLUMNS.forEach(col => {
-        const value = byHeader[normalizeHeader(col.header)] ?? raw[col.key] ?? '';
+        const value = getPendudukRawValue(raw, col);
         if (col.key === 'rt') payload[col.key] = normalizeRt(value);
         else if (col.type === 'number') payload[col.key] = normalizeNumber(value);
         else if (col.type === 'date') payload[col.key] = normalizeDateValue(value);
@@ -639,6 +693,28 @@ async function syncPendudukAllToSheets() {
         showToast('Semua data penduduk berhasil disinkronkan per RT.');
     } catch (err) {
         showToast('Gagal sync Google Sheets: ' + (err.message || err), 'error');
+    }
+}
+function confirmClearPenduduk() {
+    if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk dibersihkan.', 'info'); return; }
+    document.getElementById('deleteMessage').textContent = 'Hapus semua data penduduk yang sudah diimport? Tindakan ini tidak menghapus file Excel asli.';
+    deleteCallback = clearPendudukImport;
+    openModal('modalDelete');
+}
+async function clearPendudukImport() {
+    try {
+        const { error } = await sb.from('penduduk').delete().not('id', 'is', null);
+        if (error) throw error;
+        penduduk = [];
+        pendudukRtFilter = 'Semua';
+        pendudukSearchQuery = '';
+        const search = document.getElementById('pendudukSearch');
+        if (search) search.value = '';
+        closeModal('modalDelete');
+        showToast('Semua data penduduk berhasil dibersihkan.');
+        renderPenduduk();
+    } catch (err) {
+        showToast('Gagal clear data penduduk: ' + getPendudukErrorMessage(err), 'error');
     }
 }
 async function handlePendudukImport(e) {
