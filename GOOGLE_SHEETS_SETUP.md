@@ -55,6 +55,7 @@ Jika muncul `FUNCTION_INVOCATION_FAILED`:
 4. Pastikan spreadsheet sudah di-share ke `GOOGLE_SERVICE_ACCOUNT_EMAIL` sebagai `Editor`.
 5. Pastikan `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` berisi private key lengkap, termasuk:
    `-----BEGIN PRIVATE KEY-----` dan `-----END PRIVATE KEY-----`.
-6. Buka Vercel Dashboard -> Project -> Functions/Logs untuk melihat error detail dari `/api/sync-penduduk-sheets`.
+6. Coba tombol `Sync Filter` untuk satu RT dulu sebelum `Sync Semua RT`.
+7. Buka Vercel Dashboard -> Project -> Functions/Logs untuk melihat error detail dari `/api/sync-penduduk-sheets`.
 
 Endpoint sync mengambil data penduduk langsung dari Supabase, jadi browser tidak mengirim seluruh data besar ke function.

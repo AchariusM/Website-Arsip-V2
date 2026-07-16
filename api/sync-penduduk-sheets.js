@@ -144,6 +144,25 @@ async function writeSheet(sheets, spreadsheetId, title, rows) {
   });
 }
 
+async function writeSheetsBatch(sheets, spreadsheetId, sheetRows) {
+  const ranges = sheetRows.map(sheet => `'${sheet.title}'!A:T`);
+  await sheets.spreadsheets.values.batchClear({
+    spreadsheetId,
+    requestBody: { ranges }
+  });
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption: 'RAW',
+      data: sheetRows.map(sheet => ({
+        range: `'${sheet.title}'!A1`,
+        values: rowsToValues(sheet.rows)
+      }))
+    }
+  });
+}
+
 export default async function handler(req, res) {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -180,10 +199,13 @@ export default async function handler(req, res) {
     if (mode === 'all') {
       const titles = ['Semua RT', 'RT 1', 'RT 2', 'RT 3', 'RT 4', 'RT 5', 'RT 6'];
       await ensureSheets(sheets, spreadsheetId, titles);
-      await writeSheet(sheets, spreadsheetId, 'Semua RT', rows);
-      for (const n of ['1', '2', '3', '4', '5', '6']) {
-        await writeSheet(sheets, spreadsheetId, 'RT ' + n, rows.filter(row => normalizeRt(row.rt) === n));
-      }
+      await writeSheetsBatch(sheets, spreadsheetId, [
+        { title: 'Semua RT', rows },
+        ...['1', '2', '3', '4', '5', '6'].map(n => ({
+          title: 'RT ' + n,
+          rows: rows.filter(row => normalizeRt(row.rt) === n)
+        }))
+      ]);
       return res.status(200).json({ ok: true, mode: 'all', rows: rows.length });
     }
 
