@@ -99,6 +99,10 @@ function normalizeRt(rt) {
     const m = String(rt || '').match(/\d+/);
     return m ? String(parseInt(m[0], 10)) : '';
 }
+function normalizeRtInRange(rt) {
+    const value = normalizeRt(rt);
+    return RT_OPTIONS.includes(value) ? value : '';
+}
 function normalizeNumber(v) {
     if (v === null || v === undefined || v === '') return null;
     const n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
@@ -596,16 +600,18 @@ function buildPendudukHeaderMap(headers) {
     });
     return map;
 }
-function rowsFromSheet(sheet) {
+function rowsFromSheet(sheet, sheetName) {
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
     const headerIndex = findHeaderRow(matrix);
     const headers = (matrix[headerIndex] || []).map(v => String(v || '').trim());
     const headerMap = buildPendudukHeaderMap(headers);
+    const sheetRt = normalizeRtInRange(sheetName);
     return matrix.slice(headerIndex + 1).map(row => {
         const obj = {};
         headers.forEach((h, i) => { if (h) obj[h] = row[i]; });
         obj.__cells = row;
         obj.__headerMap = headerMap;
+        obj.__sheetRt = sheetRt;
         return obj;
     });
 }
@@ -630,7 +636,7 @@ function buildPendudukPayload(raw) {
     const payload = {};
     PENDUDUK_COLUMNS.forEach(col => {
         const value = getPendudukRawValue(raw, col);
-        if (col.key === 'rt') payload[col.key] = normalizeRt(value);
+        if (col.key === 'rt') payload[col.key] = normalizeRtInRange(value) || raw.__sheetRt || '';
         else if (col.type === 'number') payload[col.key] = normalizeNumber(value);
         else if (col.type === 'date') payload[col.key] = normalizeDateValue(value);
         else payload[col.key] = String(value || '').trim();
@@ -724,15 +730,17 @@ async function handlePendudukImport(e) {
         if (!window.XLSX) throw new Error('Library pembaca Excel belum termuat. Refresh halaman lalu coba lagi.');
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawRows = rowsFromSheet(sheet);
+        const rawRows = workbook.SheetNames.flatMap(sheetName => {
+            const sheet = workbook.Sheets[sheetName];
+            return rowsFromSheet(sheet, sheetName);
+        });
         const rows = rawRows.map(buildPendudukPayload).filter(r => r.nama || r.nik);
         if (rows.length === 0) { showToast('File tidak berisi data penduduk yang valid.', 'error'); return; }
         for (const chunk of chunkArray(rows, 300)) {
             const { error } = await sb.from('penduduk').insert(chunk);
             if (error) throw error;
         }
-        showToast(rows.length + ' data penduduk berhasil diimport dan dipisah otomatis per RT.');
+        showToast(rows.length + ' data penduduk berhasil diimport dari semua sheet dan dipisah otomatis per RT.');
         e.target.value = '';
         await loadAllData();
         renderPenduduk();
