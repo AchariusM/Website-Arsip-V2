@@ -655,7 +655,7 @@ function pendudukToExportRows(rows) {
 function safeSheetName(name) {
     return String(name || 'Sheet').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
 }
-function downloadPendudukWorkbook(sheets, fileName) {
+function createPendudukWorkbook(sheets) {
     if (!window.XLSX) { showToast('Library export Excel belum termuat. Refresh halaman lalu coba lagi.', 'error'); return; }
     const workbook = XLSX.utils.book_new();
     sheets.forEach(sheet => {
@@ -663,7 +663,29 @@ function downloadPendudukWorkbook(sheets, fileName) {
         const worksheet = XLSX.utils.json_to_sheet(rows, { header: PENDUDUK_COLUMNS.map(c => c.header) });
         XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheet.name));
     });
+    return workbook;
+}
+function getPendudukPerRtSheets() {
+    const sheets = [{ name: 'Semua RT', rows: penduduk }];
+    RT_OPTIONS.slice(1).forEach(rt => {
+        sheets.push({ name: 'RT ' + rt, rows: penduduk.filter(p => normalizeRt(p.rt) === rt) });
+    });
+    return sheets;
+}
+function downloadPendudukWorkbook(sheets, fileName) {
+    const workbook = createPendudukWorkbook(sheets);
+    if (!workbook) return;
     XLSX.writeFile(workbook, fileName);
+}
+function workbookToBase64(workbook) {
+    const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    let binary = '';
+    const chunkSize = 0x8000;
+    const data = new Uint8Array(bytes);
+    for (let i = 0; i < data.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, data.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
 }
 function exportPendudukAktif() {
     const rows = getFilteredPenduduk();
@@ -674,12 +696,26 @@ function exportPendudukAktif() {
 }
 function exportPendudukPerRt() {
     if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk diexport.', 'error'); return; }
-    const sheets = [{ name: 'Semua RT', rows: penduduk }];
-    RT_OPTIONS.slice(1).forEach(rt => {
-        sheets.push({ name: 'RT ' + rt, rows: penduduk.filter(p => normalizeRt(p.rt) === rt) });
-    });
-    downloadPendudukWorkbook(sheets, 'data-penduduk-per-rt.xlsx');
+    downloadPendudukWorkbook(getPendudukPerRtSheets(), 'data-penduduk-per-rt.xlsx');
     showToast('Data penduduk semua RT diexport.');
+}
+async function uploadPendudukPerRtToDrive() {
+    if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk diupload ke Drive.', 'error'); return; }
+    try {
+        const workbook = createPendudukWorkbook(getPendudukPerRtSheets());
+        if (!workbook) return;
+        const stamp = new Date().toISOString().slice(0, 10);
+        const fileName = 'data-penduduk-per-rt-' + stamp + '.xlsx';
+        const result = await postJsonResponse('/api/upload-penduduk-drive', {
+            fileName,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            dataBase64: workbookToBase64(workbook)
+        });
+        showToast('File data penduduk berhasil diupload ke Google Drive.');
+        if (result.file_url) window.open(result.file_url, '_blank');
+    } catch (err) {
+        showToast('Gagal upload ke Google Drive: ' + (err.message || err), 'error');
+    }
 }
 async function syncPendudukFilterToSheets() {
     const rows = getFilteredPenduduk();

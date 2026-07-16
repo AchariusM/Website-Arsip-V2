@@ -49,12 +49,12 @@ function signJwt(unsignedJwt, privateKey) {
     .replace(/\//g, '_');
 }
 
-export async function getGoogleAccessToken({ clientEmail, privateKey }) {
+export async function getGoogleAccessToken({ clientEmail, privateKey }, scope = SHEETS_SCOPE) {
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'RS256', typ: 'JWT' };
   const claimSet = {
     iss: clientEmail,
-    scope: SHEETS_SCOPE,
+    scope,
     aud: TOKEN_URL,
     iat: now,
     exp: now + 3600

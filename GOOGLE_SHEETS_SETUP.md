@@ -26,6 +26,7 @@ Tambahkan di Vercel Project Settings:
 GOOGLE_SERVICE_ACCOUNT_EMAIL=client_email_dari_json
 GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=private_key_dari_json
 GOOGLE_SHEETS_SPREADSHEET_ID=id_spreadsheet
+GOOGLE_DRIVE_FOLDER_ID=id_folder_google_drive
 ```
 
 Untuk private key, gunakan nilai lengkap yang berisi `\n`, misalnya:
@@ -44,6 +45,9 @@ Di halaman `Data Penduduk`:
 
 - `Sync Filter`: mengirim data yang sedang tampil/filter RT aktif ke satu sheet.
 - `Sync Semua RT`: mengirim semua data ke sheet `Semua RT`, `RT 1`, `RT 2`, `RT 3`, `RT 4`, `RT 5`, dan `RT 6`.
+- `Upload Drive`: membuat file Excel berisi sheet `Semua RT`, `RT 1` sampai `RT 6`, lalu mengupload file `.xlsx` tersebut ke folder Google Drive.
+
+Untuk fitur `Upload Drive`, aktifkan juga `Google Drive API`, lalu share folder Drive tujuan ke email service account sebagai `Editor`.
 
 ## Troubleshooting
 
