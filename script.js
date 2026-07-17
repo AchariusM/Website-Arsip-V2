@@ -644,23 +644,93 @@ function buildPendudukPayload(raw) {
     return payload;
 }
 function pendudukToExportRows(rows) {
-    return rows.map(p => {
-        const row = {};
-        PENDUDUK_COLUMNS.forEach(col => {
-            row[col.header] = p[col.key] ?? '';
-        });
-        return row;
-    });
+    return rows.map((p, index) => PENDUDUK_COLUMNS.map(col => {
+        if (col.key === 'nomor') return p[col.key] || index + 1;
+        return p[col.key] ?? '';
+    }));
 }
 function safeSheetName(name) {
     return String(name || 'Sheet').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
+}
+function createPendudukTemplateSheet(rows) {
+    const headers = PENDUDUK_COLUMNS.map(col => col.header);
+    const matrix = [
+        ['PEMERINTAH KABUPATEN GUNUNGKIDUL'],
+        ['KAPANEWON GEDANGSARI'],
+        ['KALURAHAN NGALANG'],
+        [], [], [],
+        ['DATA PENDUDUK'],
+        [],
+        headers,
+        ...pendudukToExportRows(rows)
+    ];
+    const worksheet = XLSX.utils.aoa_to_sheet(matrix);
+    worksheet['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 19 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 19 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 19 } },
+        { s: { r: 6, c: 0 }, e: { r: 6, c: 19 } }
+    ];
+    worksheet['!cols'] = [
+        { wch: 5 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 30 },
+        { wch: 14 }, { wch: 5 }, { wch: 5 }, { wch: 22 }, { wch: 25 },
+        { wch: 25 }, { wch: 13 }, { wch: 18 }, { wch: 7 }, { wch: 14 },
+        { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 24 }, { wch: 10 }
+    ];
+    worksheet['!rows'] = [
+        { hpt: 23 }, { hpt: 23 }, { hpt: 23 }, {}, {}, {}, { hpt: 20 }, {}, { hpt: 32 }
+    ];
+    worksheet['!autofilter'] = { ref: 'A9:T9' };
+
+    const border = {
+        top: { style: 'thin', color: { rgb: '000000' } },
+        bottom: { style: 'thin', color: { rgb: '000000' } },
+        left: { style: 'thin', color: { rgb: '000000' } },
+        right: { style: 'thin', color: { rgb: '000000' } }
+    };
+    ['A1', 'A2', 'A3'].forEach(address => {
+        worksheet[address].s = {
+            font: { name: 'Arial', sz: 14, bold: true },
+            alignment: { horizontal: 'center', vertical: 'center' }
+        };
+    });
+    worksheet.A7.s = {
+        font: { name: 'Arial', sz: 12, bold: true },
+        alignment: { horizontal: 'center', vertical: 'center' }
+    };
+    for (let col = 0; col < PENDUDUK_COLUMNS.length; col++) {
+        const headerAddress = XLSX.utils.encode_cell({ r: 8, c: col });
+        worksheet[headerAddress].s = {
+            font: { name: 'Arial', sz: 9, bold: true },
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            fill: { fgColor: { rgb: 'D9EAD3' } },
+            border
+        };
+    }
+    for (let row = 9; row < matrix.length; row++) {
+        for (let col = 0; col < PENDUDUK_COLUMNS.length; col++) {
+            const address = XLSX.utils.encode_cell({ r: row, c: col });
+            if (!worksheet[address]) worksheet[address] = { t: 's', v: '' };
+            worksheet[address].s = {
+                font: { name: 'Arial', sz: 9 },
+                alignment: { vertical: 'center', wrapText: true },
+                border
+            };
+            if ([1, 2, 3].includes(col)) {
+                worksheet[address].t = 's';
+                worksheet[address].v = String(worksheet[address].v ?? '');
+                worksheet[address].z = '@';
+            }
+            if (col === 11 && worksheet[address].v) worksheet[address].z = 'dd/mm/yyyy';
+        }
+    }
+    return worksheet;
 }
 function createPendudukWorkbook(sheets) {
     if (!window.XLSX) { showToast('Library export Excel belum termuat. Refresh halaman lalu coba lagi.', 'error'); return; }
     const workbook = XLSX.utils.book_new();
     sheets.forEach(sheet => {
-        const rows = pendudukToExportRows(sheet.rows);
-        const worksheet = XLSX.utils.json_to_sheet(rows, { header: PENDUDUK_COLUMNS.map(c => c.header) });
+        const worksheet = createPendudukTemplateSheet(sheet.rows);
         XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheet.name));
     });
     return workbook;
