@@ -90,6 +90,11 @@ function getFileIcon(t) {
 function getInitials(n) { if (!n) return '??'; const p = n.trim().split(/\s+/); return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : p[0].substring(0, 2).toUpperCase(); }
 function getAvatarColor(n) { const c = ['#1B4332','#2D6A4F','#40916C','#065F46','#064E3B','#1E3A2F']; let h = 0; for (let i = 0; i < (n||'').length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return c[Math.abs(h) % c.length]; }
 function getUploaderName(id) { if (!id) return 'Sistem'; const u = users.find(x => x.id === id); return u ? u.nama : '-'; }
+function isCurrentUserAdmin() { return !!currentUser && String(currentUser.role || '').trim().toLowerCase() === 'admin'; }
+function updateRoleBasedAccess() {
+    const addUserButton = document.getElementById('addUserButton');
+    if (addUserButton) addUserButton.classList.toggle('hidden', !isCurrentUserAdmin());
+}
 function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 function normalizeHeader(s) {
@@ -274,6 +279,7 @@ async function handleLogin() {
     document.getElementById('headerName').textContent = currentUser.nama;
     document.getElementById('dropdownName').textContent = currentUser.nama;
     document.getElementById('dropdownRole').textContent = currentUser.role;
+    updateRoleBasedAccess();
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('mainApp').classList.remove('hidden');
     await loadAllData();
@@ -281,6 +287,7 @@ async function handleLogin() {
 }
 function handleLogout() {
     currentUser = null;
+    updateRoleBasedAccess();
     document.getElementById('mainApp').classList.add('hidden');
     document.getElementById('loginScreen').classList.remove('hidden');
     document.getElementById('loginPassword').value = '';
@@ -910,12 +917,21 @@ function renderUsers() {
 }
 
 function openAddUserModal() {
+    if (!isCurrentUserAdmin()) {
+        showToast('Hanya Admin yang dapat menambah pengurus.', 'error');
+        return;
+    }
     document.getElementById('addUserName').value = ''; document.getElementById('addUserEmail').value = '';
     document.getElementById('addUserPassword').value = '';
     document.getElementById('addUserRole').value = 'Pengurus'; document.getElementById('addUserStatus').value = 'Aktif';
     openModal('modalAddUser');
 }
 async function handleAddUser() {
+    if (!isCurrentUserAdmin()) {
+        closeModal('modalAddUser');
+        showToast('Hanya Admin yang dapat menambah pengurus.', 'error');
+        return;
+    }
     const nama = document.getElementById('addUserName').value.trim();
     const email = document.getElementById('addUserEmail').value.trim();
     const password = document.getElementById('addUserPassword').value;

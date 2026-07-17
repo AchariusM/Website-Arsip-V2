@@ -183,7 +183,7 @@
         <div id="page-pengguna" class="hidden animate-fade">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
                 <h2 class="text-xl font-700">Manajemen Pengguna</h2>
-                <button onclick="openAddUserModal()" class="btn btn-primary"><i class="fas fa-user-plus"></i> Tambah Pengurus</button>
+                <button id="addUserButton" onclick="openAddUserModal()" class="btn btn-primary"><i class="fas fa-user-plus"></i> Tambah Pengurus</button>
             </div>
             <div class="section-card">
                 <div class="overflow-x-auto" id="usersTableContainer"></div>
@@ -351,6 +351,6 @@
 
 <div class="toast-container" id="toastContainer"></div>
 
-<script src="script.js?v=20260717-template-export-penduduk"></script>
+<script src="script.js?v=20260717-admin-only-add-user"></script>
 </body>
 </html>
