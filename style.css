@@ -15,6 +15,9 @@
 }
 * { font-family: 'Plus Jakarta Sans', sans-serif; box-sizing: border-box; }
 [hidden] { display: none !important; }
+button[onclick="uploadPendudukPerRtToDrive()"],
+button[onclick="syncPendudukFilterToSheets()"],
+button[onclick="syncPendudukAllToSheets()"] { display: none !important; }
 body { background: var(--bg); color: var(--text); margin: 0; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

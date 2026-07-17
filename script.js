@@ -11,6 +11,8 @@ let selectedFile = null;
 let documents = [];
 let users = [];
 let penduduk = [];
+let auditLogs = [];
+let auditLogLoadError = '';
 let docPage = 1;
 const docPerPage = 8;
 let globalSearchQuery = '';
@@ -90,19 +92,54 @@ function getFileIcon(t) {
 function getInitials(n) { if (!n) return '??'; const p = n.trim().split(/\s+/); return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : p[0].substring(0, 2).toUpperCase(); }
 function getAvatarColor(n) { const c = ['#1B4332','#2D6A4F','#40916C','#065F46','#064E3B','#1E3A2F']; let h = 0; for (let i = 0; i < (n||'').length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return c[Math.abs(h) % c.length]; }
 function getUploaderName(id) { if (!id) return 'Sistem'; const u = users.find(x => x.id === id); return u ? u.nama : '-'; }
-function isCurrentUserAdmin() { return !!currentUser && String(currentUser.role || '').trim().toLowerCase() === 'admin'; }
+function hasPermission(permission) {
+    return !!currentUser && !!window.AppAccess && window.AppAccess.hasPermission(currentUser.role, permission);
+}
+function isCurrentUserAdmin() { return hasPermission('users.manage'); }
+function requirePermission(permission, message) {
+    if (hasPermission(permission)) return true;
+    showToast(message || 'Anda tidak memiliki izin untuk tindakan ini.', 'error');
+    return false;
+}
 function updateRoleBasedAccess() {
-    const isAdmin = isCurrentUserAdmin();
     const addUserButton = document.getElementById('addUserButton');
     const userManagementNav = document.getElementById('userManagementNav');
+    const auditLogNav = document.getElementById('auditLogNav');
     const userManagementPage = document.getElementById('page-pengguna');
-    [addUserButton, userManagementNav].forEach(element => {
+    const adminElements = [addUserButton, userManagementNav, auditLogNav];
+    adminElements.forEach(element => {
         if (!element) return;
-        element.hidden = !isAdmin;
-        if (isAdmin) element.style.removeProperty('display');
+        const allowed = element === auditLogNav ? hasPermission('audit.view') : hasPermission('users.manage');
+        element.hidden = !allowed;
+        if (allowed) element.style.removeProperty('display');
         else element.style.setProperty('display', 'none', 'important');
     });
-    if (userManagementPage && !isAdmin) userManagementPage.classList.add('hidden');
+    if (userManagementPage && !hasPermission('users.manage')) userManagementPage.classList.add('hidden');
+    [
+        ['pendudukImportButton', 'penduduk.import'],
+        ['pendudukClearButton', 'penduduk.clear'],
+        ['pendudukAddButton', 'penduduk.create']
+    ].forEach(([id, permission]) => {
+        const element = document.getElementById(id);
+        if (element) element.hidden = !hasPermission(permission);
+    });
+}
+
+async function writeAuditLog(action, entityType, entityId, description, metadata) {
+    if (!currentUser) return;
+    const payload = {
+        actor_id: currentUser.id,
+        actor_name: currentUser.nama || 'Pengguna',
+        actor_role: currentUser.role || '-',
+        action,
+        entity_type: entityType,
+        entity_id: entityId === null || entityId === undefined ? null : String(entityId),
+        description,
+        metadata: metadata || {}
+    };
+    const { data, error } = await sb.from('audit_logs').insert(payload).select().single();
+    if (error) console.warn('Audit log belum tersimpan:', error.message);
+    else if (data && hasPermission('audit.view')) auditLogs.unshift(data);
 }
 function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
@@ -292,6 +329,7 @@ async function handleLogin() {
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('mainApp').classList.remove('hidden');
     await loadAllData();
+    await writeAuditLog('LOGIN', 'session', currentUser.id, currentUser.nama + ' masuk ke aplikasi.');
     showPage('dashboard');
 }
 function handleLogout() {
@@ -311,20 +349,33 @@ document.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !doc
 
 // ==================== MUAT DATA ====================
 async function loadAllData() {
-    const [docsRes, usersRes, pendudukRes] = await Promise.all([
+    const requests = [
         sb.from('documents').select('*').order('created_at', { ascending: false }),
         sb.from('users').select('*').order('id', { ascending: true }),
         sb.from('penduduk').select('*').order('rt', { ascending: true }).order('nama', { ascending: true })
-    ]);
+    ];
+    if (hasPermission('audit.view')) requests.push(sb.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500));
+    const [docsRes, usersRes, pendudukRes, auditRes] = await Promise.all(requests);
     if (docsRes.error) showToast(docsRes.error.message, 'error'); else documents = docsRes.data;
     if (usersRes.error) showToast(usersRes.error.message, 'error'); else users = usersRes.data;
     if (pendudukRes.error) penduduk = []; else penduduk = pendudukRes.data || [];
+    if (auditRes) {
+        auditLogLoadError = auditRes.error ? auditRes.error.message : '';
+        auditLogs = auditRes.error ? [] : (auditRes.data || []);
+    } else {
+        auditLogLoadError = '';
+        auditLogs = [];
+    }
 }
 
 // ==================== NAVIGASI ====================
 function showPage(page) {
-    if (page === 'pengguna' && !isCurrentUserAdmin()) {
+    if (page === 'pengguna' && !hasPermission('users.manage')) {
         showToast('Manajemen pengguna hanya dapat diakses oleh Admin.', 'error');
+        page = 'dashboard';
+    }
+    if (page === 'audit' && !hasPermission('audit.view')) {
+        showToast('Audit Log hanya dapat diakses oleh Admin.', 'error');
         page = 'dashboard';
     }
     document.querySelectorAll('[id^="page-"]').forEach(el => el.classList.add('hidden'));
@@ -335,6 +386,7 @@ function showPage(page) {
     else if (page === 'dokumen') { docPage = 1; renderDocuments(); }
     else if (page === 'penduduk') renderPenduduk();
     else if (page === 'pengguna') renderUsers();
+    else if (page === 'audit') renderAuditLogs();
 }
 
 // ==================== DASHBOARD ====================
@@ -386,8 +438,8 @@ function renderDocuments() {
                 h += '<button class="crud-btn view" title="Lihat" onclick="previewDocument(' + d.id + ')"><i class="fas fa-eye"></i></button>';
                 h += '<button class="crud-btn download" title="Unduh" onclick="downloadDocument(' + d.id + ')"><i class="fas fa-download"></i></button>';
             }
-            h += '<button class="crud-btn edit" title="Edit" onclick="openEditDocModal(' + d.id + ')"><i class="fas fa-pen"></i></button>';
-            h += '<button class="crud-btn delete" title="Hapus" onclick="confirmDeleteDoc(' + d.id + ')"><i class="fas fa-trash-alt"></i></button>';
+            if (hasPermission('documents.update')) h += '<button class="crud-btn edit" title="Edit" onclick="openEditDocModal(' + d.id + ')"><i class="fas fa-pen"></i></button>';
+            if (hasPermission('documents.delete')) h += '<button class="crud-btn delete" title="Hapus" onclick="confirmDeleteDoc(' + d.id + ')"><i class="fas fa-trash-alt"></i></button>';
             h += '</div></td></tr>';
         });
     }
@@ -406,6 +458,7 @@ function renderDocuments() {
 function goToPage(p) { const tp = Math.max(1, Math.ceil(documents.length / docPerPage)); if (p < 1 || p > tp) return; docPage = p; renderDocuments(); }
 
 function openUploadModal() {
+    if (!requirePermission('documents.create', 'Anda tidak memiliki izin untuk mengunggah dokumen.')) return;
     selectedFile = null;
     document.getElementById('fileInput').value = '';
     document.getElementById('uploadJudul').value = '';
@@ -433,6 +486,7 @@ function processFile(file) {
 }
 
 async function handleUpload() {
+    if (!requirePermission('documents.create', 'Anda tidak memiliki izin untuk mengunggah dokumen.')) return;
     try {
         const judul = document.getElementById('uploadJudul').value.trim();
         const kategori = document.getElementById('uploadKategori').value.trim();
@@ -459,6 +513,7 @@ async function handleUpload() {
         });
         if (error) { showToast(error.message, 'error'); return; }
 
+        await writeAuditLog('TAMBAH', 'dokumen', null, 'Mengunggah dokumen "' + judul + '".', { kategori, file_name });
         closeModal('modalUpload');
         showToast('Dokumen "' + judul + '" berhasil diunggah.');
         await loadAllData();
@@ -470,6 +525,7 @@ async function handleUpload() {
 }
 
 function openEditDocModal(id) {
+    if (!requirePermission('documents.update', 'Hanya Admin yang dapat mengubah dokumen.')) return;
     const d = documents.find(x => x.id === id); if (!d) return;
     document.getElementById('editDocId').value = id;
     document.getElementById('editDocJudul').value = d.judul;
@@ -479,6 +535,7 @@ function openEditDocModal(id) {
     openModal('modalEditDoc');
 }
 async function handleEditDoc() {
+    if (!requirePermission('documents.update', 'Hanya Admin yang dapat mengubah dokumen.')) return;
     const id = parseInt(document.getElementById('editDocId').value);
     const judul = document.getElementById('editDocJudul').value.trim();
     const kategori = document.getElementById('editDocKategori').value.trim();
@@ -490,16 +547,20 @@ async function handleEditDoc() {
         deskripsi: document.getElementById('editDocDeskripsi').value.trim()
     }).eq('id', id);
     if (error) { showToast(error.message, 'error'); return; }
+    await writeAuditLog('UBAH', 'dokumen', id, 'Mengubah dokumen "' + judul + '".', { kategori });
     closeModal('modalEditDoc'); showToast('Dokumen berhasil diperbarui.');
     await loadAllData(); renderDocuments(); renderDashboard();
 }
 
 function confirmDeleteDoc(id) {
+    if (!requirePermission('documents.delete', 'Hanya Admin yang dapat menghapus dokumen.')) return;
     const d = documents.find(x => x.id === id); if (!d) return;
     document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus dokumen "' + d.judul + '"?';
     deleteCallback = async function() {
+        if (!requirePermission('documents.delete', 'Hanya Admin yang dapat menghapus dokumen.')) return;
         const { error } = await sb.from('documents').delete().eq('id', id);
         if (error) { showToast(error.message, 'error'); return; }
+        await writeAuditLog('HAPUS', 'dokumen', id, 'Menghapus dokumen "' + d.judul + '".', { kategori: d.kategori });
         closeModal('modalDelete'); showToast('Dokumen berhasil dihapus.', 'success');
         await loadAllData(); renderDocuments(); renderDashboard();
     };
@@ -786,6 +847,7 @@ function workbookToBase64(workbook) {
     return btoa(binary);
 }
 function exportPendudukAktif() {
+    if (!requirePermission('penduduk.export', 'Anda tidak memiliki izin untuk export data penduduk.')) return;
     const rows = getFilteredPenduduk();
     if (rows.length === 0) { showToast('Tidak ada data untuk diexport.', 'error'); return; }
     const label = pendudukRtFilter === 'Semua' ? 'semua-rt' : 'rt-' + pendudukRtFilter;
@@ -793,6 +855,7 @@ function exportPendudukAktif() {
     showToast(rows.length + ' data penduduk diexport.');
 }
 function exportPendudukPerRt() {
+    if (!requirePermission('penduduk.export', 'Anda tidak memiliki izin untuk export data penduduk.')) return;
     if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk diexport.', 'error'); return; }
     downloadPendudukWorkbook(getPendudukPerRtSheets(), 'data-penduduk-per-rt.xlsx');
     showToast('Data penduduk semua RT diexport.');
@@ -836,15 +899,19 @@ async function syncPendudukAllToSheets() {
     }
 }
 function confirmClearPenduduk() {
+    if (!requirePermission('penduduk.clear', 'Hanya Admin yang dapat membersihkan data penduduk.')) return;
     if (penduduk.length === 0) { showToast('Belum ada data penduduk untuk dibersihkan.', 'info'); return; }
     document.getElementById('deleteMessage').textContent = 'Hapus semua data penduduk yang sudah diimport? Tindakan ini tidak menghapus file Excel asli.';
     deleteCallback = clearPendudukImport;
     openModal('modalDelete');
 }
 async function clearPendudukImport() {
+    if (!requirePermission('penduduk.clear', 'Hanya Admin yang dapat membersihkan data penduduk.')) return;
     try {
+        const deletedCount = penduduk.length;
         const { error } = await sb.from('penduduk').delete().not('id', 'is', null);
         if (error) throw error;
+        await writeAuditLog('CLEAR', 'penduduk', null, 'Membersihkan seluruh data penduduk (' + deletedCount + ' baris).', { jumlah: deletedCount });
         penduduk = [];
         pendudukRtFilter = 'Semua';
         pendudukSearchQuery = '';
@@ -858,6 +925,10 @@ async function clearPendudukImport() {
     }
 }
 async function handlePendudukImport(e) {
+    if (!requirePermission('penduduk.import', 'Hanya Admin yang dapat mengimpor data penduduk.')) {
+        if (e && e.target) e.target.value = '';
+        return;
+    }
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     try {
@@ -874,6 +945,7 @@ async function handlePendudukImport(e) {
             const { error } = await sb.from('penduduk').insert(chunk);
             if (error) throw error;
         }
+        await writeAuditLog('IMPORT', 'penduduk', null, 'Mengimpor ' + rows.length + ' data penduduk dari "' + file.name + '".', { jumlah: rows.length, file_name: file.name });
         showToast(rows.length + ' data penduduk berhasil diimport dari semua sheet dan dipisah otomatis per RT.');
         e.target.value = '';
         await loadAllData();
@@ -883,6 +955,7 @@ async function handlePendudukImport(e) {
     }
 }
 function openAddPendudukModal() {
+    if (!requirePermission('penduduk.create', 'Hanya Admin yang dapat menambah data penduduk.')) return;
     const c = document.getElementById('pendudukManualFields');
     c.innerHTML = PENDUDUK_COLUMNS.map(col => {
         const type = col.type === 'date' ? 'date' : (col.type === 'number' ? 'number' : 'text');
@@ -891,6 +964,7 @@ function openAddPendudukModal() {
     openModal('modalAddPenduduk');
 }
 async function handleAddPenduduk() {
+    if (!requirePermission('penduduk.create', 'Hanya Admin yang dapat menambah data penduduk.')) return;
     const raw = {};
     PENDUDUK_COLUMNS.forEach(col => {
         const el = document.getElementById('penduduk_' + col.key);
@@ -900,10 +974,38 @@ async function handleAddPenduduk() {
     if (!payload.nama || !payload.nik) { showToast('Nama dan NIK wajib diisi.', 'error'); return; }
     const { error } = await sb.from('penduduk').insert(payload);
     if (error) { showToast(getPendudukErrorMessage(error), 'error'); return; }
+    await writeAuditLog('TAMBAH', 'penduduk', payload.nik, 'Menambahkan data penduduk "' + payload.nama + '".', { nik: payload.nik, rt: payload.rt });
     closeModal('modalAddPenduduk');
     showToast('Data penduduk berhasil disimpan.');
     await loadAllData();
     renderPenduduk();
+}
+
+// ==================== AUDIT LOG ====================
+function renderAuditLogs() {
+    const container = document.getElementById('auditTableContainer');
+    if (!container || !hasPermission('audit.view')) return;
+    if (auditLogLoadError) {
+        container.innerHTML = '<div class="empty-state py-12"><i class="fas fa-database block"></i><p class="text-sm font-600">Audit Log belum aktif</p><p class="text-xs mt-2" style="color:var(--text-muted);">Jalankan audit-log-setup.sql di Supabase SQL Editor.</p></div>';
+        return;
+    }
+    let html = '<table class="data-table"><thead><tr><th>Waktu</th><th>Pengguna</th><th>Aksi</th><th>Bagian</th><th>Keterangan</th></tr></thead><tbody>';
+    if (auditLogs.length === 0) {
+        html += '<tr><td colspan="5" class="text-center py-12" style="color:var(--text-muted);">Belum ada aktivitas tercatat.</td></tr>';
+    } else {
+        auditLogs.forEach(log => {
+            const time = log.created_at ? new Date(log.created_at).toLocaleString('id-ID') : '-';
+            html += '<tr>';
+            html += '<td class="text-sm" style="white-space:nowrap;color:var(--text-muted);">' + escapeHtml(time) + '</td>';
+            html += '<td><div class="font-600 text-sm">' + escapeHtml(log.actor_name) + '</div><div class="text-xs" style="color:var(--text-muted);">' + escapeHtml(log.actor_role) + '</div></td>';
+            html += '<td><span class="badge badge-kategori">' + escapeHtml(log.action) + '</span></td>';
+            html += '<td class="text-sm">' + escapeHtml(log.entity_type) + '</td>';
+            html += '<td class="text-sm">' + escapeHtml(log.description) + '</td>';
+            html += '</tr>';
+        });
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 // ==================== PENGGUNA ====================
@@ -964,16 +1066,19 @@ async function handleAddUser() {
 
     const { error } = await sb.from('users').insert({ nama, email, password, role, status });
     if (error) { showToast(error.message, 'error'); return; }
+    await writeAuditLog('TAMBAH', 'pengguna', null, 'Menambahkan pengguna "' + nama + '".', { email, role, status });
     closeModal('modalAddUser'); showToast('Pengurus "' + nama + '" berhasil ditambahkan.');
     await loadAllData(); renderUsers(); renderDashboard();
 }
 function openEditUserModal(id) {
+    if (!requirePermission('users.manage', 'Hanya Admin yang dapat mengubah pengguna.')) return;
     const u = users.find(x => x.id === id); if (!u) return;
     document.getElementById('editUserId').value = id; document.getElementById('editUserName').value = u.nama;
     document.getElementById('editUserEmail').value = u.email; document.getElementById('editUserRole').value = u.role;
     document.getElementById('editUserStatus').value = u.status || 'Aktif'; openModal('modalEditUser');
 }
 async function handleEditUser() {
+    if (!requirePermission('users.manage', 'Hanya Admin yang dapat mengubah pengguna.')) return;
     const id = parseInt(document.getElementById('editUserId').value);
     const nama = document.getElementById('editUserName').value.trim();
     const email = document.getElementById('editUserEmail').value.trim();
@@ -989,16 +1094,20 @@ async function handleEditUser() {
         status: document.getElementById('editUserStatus').value
     }).eq('id', id);
     if (error) { showToast(error.message, 'error'); return; }
+    await writeAuditLog('UBAH', 'pengguna', id, 'Mengubah data pengguna "' + nama + '".', { email });
     closeModal('modalEditUser'); showToast('Data pengguna berhasil diperbarui.');
     await loadAllData(); renderUsers(); renderDashboard();
 }
 function confirmDeleteUser(id) {
+    if (!requirePermission('users.manage', 'Hanya Admin yang dapat menghapus pengguna.')) return;
     const u = users.find(x => x.id === id); if (!u) return;
     if ((u.role || '').toLowerCase() === 'admin') { showToast('Akun Admin tidak dapat dihapus.', 'error'); return; }
     document.getElementById('deleteMessage').textContent = 'Apakah Anda yakin ingin menghapus pengguna "' + u.nama + '"?';
     deleteCallback = async function() {
+        if (!requirePermission('users.manage', 'Hanya Admin yang dapat menghapus pengguna.')) return;
         const { error } = await sb.from('users').delete().eq('id', id);
         if (error) { showToast(error.message, 'error'); return; }
+        await writeAuditLog('HAPUS', 'pengguna', id, 'Menghapus pengguna "' + u.nama + '".', { email: u.email, role: u.role });
         closeModal('modalDelete'); showToast('Pengguna "' + u.nama + '" berhasil dihapus.', 'success');
         await loadAllData(); renderUsers(); renderDashboard();
     };

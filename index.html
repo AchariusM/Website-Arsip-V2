@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260717-user-role-access">
+    <link rel="stylesheet" href="style.css?v=20260717-hide-legacy-sync-buttons">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -103,6 +103,7 @@
             <a class="nav-link" data-page="dokumen" onclick="showPage('dokumen')"><i class="fas fa-folder-open"></i> Manajemen Dokumen</a>
             <a class="nav-link" data-page="penduduk" onclick="showPage('penduduk')"><i class="fas fa-address-book"></i> Data Penduduk</a>
             <a id="userManagementNav" class="nav-link" data-page="pengguna" onclick="showPage('pengguna')" hidden style="display:none !important;"><i class="fas fa-users-cog"></i> Manajemen Pengguna</a>
+            <a id="auditLogNav" class="nav-link" data-page="audit" onclick="showPage('audit')" hidden style="display:none !important;"><i class="fas fa-history"></i> Audit Log</a>
         </div>
     </nav>
 
@@ -152,12 +153,12 @@
                     <p class="text-sm mt-1" style="color: var(--text-muted);">Data otomatis dipisah berdasarkan RT 1 sampai RT 6.</p>
                 </div>
                 <div class="flex flex-wrap gap-2">
-                    <label class="btn btn-secondary" for="pendudukImportFile"><i class="fas fa-file-import"></i> Import Excel/CSV</label>
+                    <label id="pendudukImportButton" class="btn btn-secondary" for="pendudukImportFile"><i class="fas fa-file-import"></i> Import Excel/CSV</label>
                     <input id="pendudukImportFile" type="file" accept=".xls,.xlsx,.csv" class="hidden" onchange="handlePendudukImport(event)">
                     <button onclick="exportPendudukAktif()" class="btn btn-secondary"><i class="fas fa-file-export"></i> Export Filter</button>
                     <button onclick="exportPendudukPerRt()" class="btn btn-secondary"><i class="fas fa-table"></i> Export per RT</button>
-                    <button onclick="confirmClearPenduduk()" class="btn btn-danger"><i class="fas fa-broom"></i> Clear Import</button>
-                    <button onclick="openAddPendudukModal()" class="btn btn-primary"><i class="fas fa-user-plus"></i> Input Manual</button>
+                    <button id="pendudukClearButton" onclick="confirmClearPenduduk()" class="btn btn-danger"><i class="fas fa-broom"></i> Clear Import</button>
+                    <button id="pendudukAddButton" onclick="openAddPendudukModal()" class="btn btn-primary"><i class="fas fa-user-plus"></i> Input Manual</button>
                 </div>
             </div>
             <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-5" id="pendudukStats"></div>
@@ -183,6 +184,17 @@
             </div>
             <div class="section-card">
                 <div class="overflow-x-auto" id="usersTableContainer"></div>
+            </div>
+        </div>
+
+        <!-- ===== AUDIT LOG ===== -->
+        <div id="page-audit" class="hidden animate-fade">
+            <div class="mb-5">
+                <h2 class="text-xl font-700">Audit Log</h2>
+                <p class="text-sm mt-1" style="color:var(--text-muted);">Riwayat aktivitas penting untuk membantu pemeriksaan perubahan data.</p>
+            </div>
+            <div class="section-card">
+                <div class="overflow-x-auto" id="auditTableContainer"></div>
             </div>
         </div>
     </main>
@@ -347,6 +359,7 @@
 
 <div class="toast-container" id="toastContainer"></div>
 
-<script src="script.js?v=20260717-strict-admin-only-user-management"></script>
+<script src="access-control.js?v=20260717-role-matrix"></script>
+<script src="script.js?v=20260717-access-audit-tests"></script>
 </body>
 </html>
