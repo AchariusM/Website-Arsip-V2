@@ -92,8 +92,13 @@ function getAvatarColor(n) { const c = ['#1B4332','#2D6A4F','#40916C','#065F46',
 function getUploaderName(id) { if (!id) return 'Sistem'; const u = users.find(x => x.id === id); return u ? u.nama : '-'; }
 function isCurrentUserAdmin() { return !!currentUser && String(currentUser.role || '').trim().toLowerCase() === 'admin'; }
 function updateRoleBasedAccess() {
+    const isAdmin = isCurrentUserAdmin();
     const addUserButton = document.getElementById('addUserButton');
-    if (addUserButton) addUserButton.classList.toggle('hidden', !isCurrentUserAdmin());
+    const userManagementNav = document.getElementById('userManagementNav');
+    const userManagementPage = document.getElementById('page-pengguna');
+    if (addUserButton) addUserButton.hidden = !isAdmin;
+    if (userManagementNav) userManagementNav.hidden = !isAdmin;
+    if (userManagementPage && !isAdmin) userManagementPage.classList.add('hidden');
 }
 function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
@@ -314,6 +319,10 @@ async function loadAllData() {
 
 // ==================== NAVIGASI ====================
 function showPage(page) {
+    if (page === 'pengguna' && !isCurrentUserAdmin()) {
+        showToast('Manajemen pengguna hanya dapat diakses oleh Admin.', 'error');
+        page = 'dashboard';
+    }
     document.querySelectorAll('[id^="page-"]').forEach(el => el.classList.add('hidden'));
     const t = document.getElementById('page-' + page);
     if (t) { t.classList.remove('hidden'); t.classList.remove('animate-fade'); void t.offsetWidth; t.classList.add('animate-fade'); }
@@ -895,6 +904,11 @@ async function handleAddPenduduk() {
 
 // ==================== PENGGUNA ====================
 function renderUsers() {
+    if (!isCurrentUserAdmin()) {
+        const container = document.getElementById('usersTableContainer');
+        if (container) container.innerHTML = '';
+        return;
+    }
     let h = '<table class="data-table"><thead><tr><th style="width:40px;">No</th><th>Pengguna</th><th>Email</th><th>Role</th><th>Status</th><th style="width:100px;">Aksi</th></tr></thead><tbody>';
     if (users.length === 0) {
         h += '<tr><td colspan="6" class="text-center py-12"><div class="empty-state"><i class="fas fa-users block"></i><p class="text-sm">Belum ada pengguna</p></div></td></tr>';

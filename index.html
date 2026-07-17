@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260717-user-role-access">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -102,7 +102,7 @@
             <a class="nav-link active" data-page="dashboard" onclick="showPage('dashboard')"><i class="fas fa-th-large"></i> Dashboard</a>
             <a class="nav-link" data-page="dokumen" onclick="showPage('dokumen')"><i class="fas fa-folder-open"></i> Manajemen Dokumen</a>
             <a class="nav-link" data-page="penduduk" onclick="showPage('penduduk')"><i class="fas fa-address-book"></i> Data Penduduk</a>
-            <a class="nav-link" data-page="pengguna" onclick="showPage('pengguna')"><i class="fas fa-users-cog"></i> Manajemen Pengguna</a>
+            <a id="userManagementNav" class="nav-link" data-page="pengguna" onclick="showPage('pengguna')"><i class="fas fa-users-cog"></i> Manajemen Pengguna</a>
         </div>
     </nav>
 
@@ -351,6 +351,6 @@
 
 <div class="toast-container" id="toastContainer"></div>
 
-<script src="script.js?v=20260717-admin-only-add-user"></script>
+<script src="script.js?v=20260717-fix-admin-only-user-management"></script>
 </body>
 </html>
