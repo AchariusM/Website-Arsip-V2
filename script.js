@@ -96,8 +96,12 @@ function updateRoleBasedAccess() {
     const addUserButton = document.getElementById('addUserButton');
     const userManagementNav = document.getElementById('userManagementNav');
     const userManagementPage = document.getElementById('page-pengguna');
-    if (addUserButton) addUserButton.hidden = !isAdmin;
-    if (userManagementNav) userManagementNav.hidden = !isAdmin;
+    [addUserButton, userManagementNav].forEach(element => {
+        if (!element) return;
+        element.hidden = !isAdmin;
+        if (isAdmin) element.style.removeProperty('display');
+        else element.style.setProperty('display', 'none', 'important');
+    });
     if (userManagementPage && !isAdmin) userManagementPage.classList.add('hidden');
 }
 function escapeHtml(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
