@@ -644,16 +644,15 @@ function buildPendudukPayload(raw) {
     return payload;
 }
 function pendudukToExportRows(rows) {
-    return rows.map((p, index) => PENDUDUK_COLUMNS.map(col => {
-        if (col.key === 'nomor') return p[col.key] || index + 1;
-        return p[col.key] ?? '';
-    }));
+    const exportColumns = PENDUDUK_COLUMNS.filter(col => col.key !== 'nomor');
+    return rows.map(p => exportColumns.map(col => p[col.key] ?? ''));
 }
 function safeSheetName(name) {
     return String(name || 'Sheet').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31);
 }
 function createPendudukTemplateSheet(rows) {
-    const headers = PENDUDUK_COLUMNS.map(col => col.header);
+    const exportColumns = PENDUDUK_COLUMNS.filter(col => col.key !== 'nomor');
+    const headers = exportColumns.map(col => col.header);
     const matrix = [
         ['PEMERINTAH KABUPATEN GUNUNGKIDUL'],
         ['KAPANEWON GEDANGSARI'],
@@ -666,21 +665,21 @@ function createPendudukTemplateSheet(rows) {
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(matrix);
     worksheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 19 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 19 } },
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 19 } },
-        { s: { r: 6, c: 0 }, e: { r: 6, c: 19 } }
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 18 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 18 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 18 } },
+        { s: { r: 6, c: 0 }, e: { r: 6, c: 18 } }
     ];
     worksheet['!cols'] = [
-        { wch: 5 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 30 },
-        { wch: 14 }, { wch: 5 }, { wch: 5 }, { wch: 22 }, { wch: 25 },
-        { wch: 25 }, { wch: 13 }, { wch: 18 }, { wch: 7 }, { wch: 14 },
-        { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 24 }, { wch: 10 }
+        { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 30 }, { wch: 14 },
+        { wch: 5 }, { wch: 5 }, { wch: 22 }, { wch: 25 }, { wch: 25 },
+        { wch: 13 }, { wch: 18 }, { wch: 7 }, { wch: 14 }, { wch: 18 },
+        { wch: 12 }, { wch: 24 }, { wch: 24 }, { wch: 10 }
     ];
     worksheet['!rows'] = [
         { hpt: 23 }, { hpt: 23 }, { hpt: 23 }, {}, {}, {}, { hpt: 20 }, {}, { hpt: 32 }
     ];
-    worksheet['!autofilter'] = { ref: 'A9:T9' };
+    worksheet['!autofilter'] = { ref: 'A9:S9' };
 
     const border = {
         top: { style: 'thin', color: { rgb: '000000' } },
@@ -688,27 +687,36 @@ function createPendudukTemplateSheet(rows) {
         left: { style: 'thin', color: { rgb: '000000' } },
         right: { style: 'thin', color: { rgb: '000000' } }
     };
-    ['A1', 'A2', 'A3'].forEach(address => {
+    worksheet.A1.s = {
+        font: { name: 'Arial', sz: 16, bold: true },
+        alignment: { horizontal: 'center', vertical: 'center' }
+    };
+    ['A2', 'A3'].forEach(address => {
         worksheet[address].s = {
             font: { name: 'Arial', sz: 14, bold: true },
             alignment: { horizontal: 'center', vertical: 'center' }
         };
     });
+    for (let col = 0; col < exportColumns.length; col++) {
+        const address = XLSX.utils.encode_cell({ r: 4, c: col });
+        if (!worksheet[address]) worksheet[address] = { t: 's', v: '' };
+        worksheet[address].s = { border: { bottom: { style: 'thin', color: { rgb: '000000' } } } };
+    }
     worksheet.A7.s = {
         font: { name: 'Arial', sz: 12, bold: true },
         alignment: { horizontal: 'center', vertical: 'center' }
     };
-    for (let col = 0; col < PENDUDUK_COLUMNS.length; col++) {
+    for (let col = 0; col < exportColumns.length; col++) {
         const headerAddress = XLSX.utils.encode_cell({ r: 8, c: col });
         worksheet[headerAddress].s = {
             font: { name: 'Arial', sz: 9, bold: true },
             alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-            fill: { fgColor: { rgb: 'D9EAD3' } },
+            fill: { fgColor: { rgb: 'FFFFFF' } },
             border
         };
     }
     for (let row = 9; row < matrix.length; row++) {
-        for (let col = 0; col < PENDUDUK_COLUMNS.length; col++) {
+        for (let col = 0; col < exportColumns.length; col++) {
             const address = XLSX.utils.encode_cell({ r: row, c: col });
             if (!worksheet[address]) worksheet[address] = { t: 's', v: '' };
             worksheet[address].s = {
@@ -716,12 +724,12 @@ function createPendudukTemplateSheet(rows) {
                 alignment: { vertical: 'center', wrapText: true },
                 border
             };
-            if ([1, 2, 3].includes(col)) {
+            if ([0, 1, 2].includes(col)) {
                 worksheet[address].t = 's';
                 worksheet[address].v = String(worksheet[address].v ?? '');
                 worksheet[address].z = '@';
             }
-            if (col === 11 && worksheet[address].v) worksheet[address].z = 'dd/mm/yyyy';
+            if (col === 10 && worksheet[address].v) worksheet[address].z = 'dd/mm/yyyy';
         }
     }
     return worksheet;
