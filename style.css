@@ -19,6 +19,11 @@ button[onclick="uploadPendudukPerRtToDrive()"],
 button[onclick="syncPendudukFilterToSheets()"],
 button[onclick="syncPendudukAllToSheets()"] { display: none !important; }
 body { background: var(--bg); color: var(--text); margin: 0; }
+.site-signature {
+    position: fixed; right: 12px; bottom: 8px; z-index: 900;
+    font-size: 0.65rem; font-weight: 800; letter-spacing: 0.16em;
+    color: var(--primary); opacity: 0.55; user-select: none;
+}
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
