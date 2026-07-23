@@ -466,7 +466,7 @@ function openUploadModal() {
     document.getElementById('uploadTanggal').value = todayStr();
     document.getElementById('uploadDeskripsi').value = '';
     const z = document.getElementById('uploadZone'); z.classList.remove('has-file');
-    document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-cloud-upload-alt text-3xl mb-3" style="color:var(--accent);"></i><p class="text-sm font-600 mb-1">Klik atau seret file ke sini</p><p class="text-xs" style="color:var(--text-muted);">PDF, DOCX, XLSX, PPTX, JPG, PNG (Maks. ' + MAX_UPLOAD_LABEL + ')</p>';
+    document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-cloud-upload-alt text-3xl mb-3" style="color:var(--accent);"></i><p class="text-sm font-600 mb-1">Klik atau seret file ke sini</p><p class="text-xs" style="color:var(--text-muted);">PDF, DOCX, XLSX, PPTX, JPG, PNG</p>';
     openModal('modalUpload');
 }
 function handleDragOver(e) { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag-over'); }
@@ -478,7 +478,10 @@ function processFile(file) {
     const allowed = ['.pdf','.docx','.doc','.xlsx','.xls','.pptx','.ppt','.jpg','.jpeg','.png'];
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     if (!allowed.includes(ext)) { showToast('Tipe file tidak diizinkan.', 'error'); return; }
-    if (file.size > MAX_UPLOAD_SIZE) { showToast('Ukuran file melebihi ' + MAX_UPLOAD_LABEL + '.', 'error'); return; }
+    if (file.size > MAX_UPLOAD_SIZE) {
+        showToast('ERR_FILE_TOO_LARGE: Ukuran file tidak boleh melebihi ' + MAX_UPLOAD_LABEL + '.', 'error');
+        return;
+    }
     selectedFile = file;
     document.getElementById('uploadZone').classList.add('has-file');
     document.getElementById('uploadZoneContent').innerHTML = '<i class="fas fa-file-check text-3xl mb-3" style="color:var(--primary-light);"></i><p class="text-sm font-600 mb-1">' + escapeHtml(file.name) + '</p><p class="text-xs" style="color:var(--text-muted);">' + formatFileSize(file.size) + ' &mdash; Klik untuk ganti</p>';

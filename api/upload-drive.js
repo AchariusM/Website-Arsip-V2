@@ -67,6 +67,12 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error(err);
+    if (err.httpCode === 413) {
+      return res.status(413).json({
+        code: 'ERR_FILE_TOO_LARGE',
+        error: 'Ukuran file tidak boleh melebihi 10MB.'
+      });
+    }
     res.status(500).json({ error: err.message || 'Gagal upload ke Google Drive' });
   }
 }
